@@ -3,6 +3,8 @@
 # Поддержка: trueconf, pacs, ping, история и т.д.
 # =============================================
 
+$scriptVersion = "2.0"
+
 # Настройки истории
 $historyFile = Join-Path $PSScriptRoot "msra_history.log"
 $maxHistoryEntries = 1000
@@ -16,10 +18,12 @@ function Show-Help {
     Clear-Host
     Write-Host "╔══════════════════════════════════════╗" -ForegroundColor Cyan
     Write-Host "║           Справка по командам        ║" -ForegroundColor Cyan
-    Write-Host "╚══════════════════════════════════════╝" -ForegroundColor CyanWrite-Host "Ошибка: $_" -ForegroundColor Red
+    Write-Host "╚══════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host "Ошибка: $_" -ForegroundColor Red
     Write-Host ""
     Write-Host "Дополнительные команды:" -ForegroundColor Yellow
     Write-Host ""
+    Write-Host "• update    - Обновить скрипт до последней версии" -ForegroundColor Gray
     Write-Host "• trueconf  - Открыть админку TrueConf" -ForegroundColor Gray
     Write-Host "• pacs      - Открыть админку PACS" -ForegroundColor Gray
     Write-Host "• glpi      - Открыть GLPI" -ForegroundColor Gray
@@ -446,7 +450,7 @@ while ($true) {
     try {
         Clear-Host
         Write-Host "╔══════════════════════════════════════╗" -ForegroundColor Cyan
-        Write-Host "║     Умное подключение MSRA v2.0      ║" -ForegroundColor Cyan
+        Write-Host "║     Умное подключение MSRA v$scriptVersion      ║" -ForegroundColor Cyan
         Write-Host "╚══════════════════════════════════════╝" -ForegroundColor Cyan
         Show-History
         $allConnections = Get-HistoryCount
@@ -506,6 +510,48 @@ while ($true) {
 
     Write-Host "`nГотово. Возвращаемся в меню..." -ForegroundColor Green
     Start-Sleep -Seconds 2
+    continue
+}
+
+if ($input -ieq "update") {
+    $currentScript = $PSCommandPath
+    if ([string]::IsNullOrEmpty($currentScript)) {
+        Write-Host "Обновление невозможно: скрипт запущен не из файла." -ForegroundColor Red
+        Read-Host "Нажмите Enter"
+        continue
+    }
+
+    $repoUrl = "https://raw.githubusercontent.com/stz1397-lab/msra-helper/main/msra.ps1"
+    $tempFile = [System.IO.Path]::GetTempFileName()
+
+    try {
+        Write-Host "Загрузка новой версии..." -ForegroundColor Cyan
+        Invoke-WebRequest -Uri $repoUrl -OutFile $tempFile -UseBasicParsing -TimeoutSec 15
+
+        # Сравним содержимое
+        $currentContent = Get-Content $currentScript -Raw
+        $newContent = Get-Content $tempFile -Raw
+
+        if ($currentContent -eq $newContent) {
+            Write-Host "У вас уже установлена последняя версия." -ForegroundColor Green
+        } else {
+            $backup = "$currentScript.bak"
+            Copy-Item $currentScript $backup -Force
+            Write-Host "Создана резервная копия: $backup" -ForegroundColor Yellow
+
+            Copy-Item $tempFile $currentScript -Force
+            Write-Host "Скрипт обновлён! Перезапуск..." -ForegroundColor Green
+            Start-Sleep -Seconds 1
+            & $currentScript
+            exit
+        }
+    } catch {
+        Write-Host "Ошибка при обновлении: $_" -ForegroundColor Red
+    } finally {
+        if (Test-Path $tempFile) { Remove-Item $tempFile -Force }
+    }
+
+    Read-Host "Нажмите Enter, чтобы вернуться в меню"
     continue
 }
 
