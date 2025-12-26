@@ -19,7 +19,6 @@ function Show-Help {
     Write-Host "╔══════════════════════════════════════╗" -ForegroundColor Cyan
     Write-Host "║           Справка по командам        ║" -ForegroundColor Cyan
     Write-Host "╚══════════════════════════════════════╝" -ForegroundColor Cyan
-    Write-Host "Ошибка: $_" -ForegroundColor Red
     Write-Host ""
     Write-Host "Дополнительные команды:" -ForegroundColor Yellow
     Write-Host ""
@@ -621,32 +620,14 @@ if ($input -ieq "update") {
 }
 
         
-        if ($input -ieq "pacs") {
+if ($input -ieq "pacs") {
     $urlPacs = "http://pacs-2.lan.smclinic.ru/pacs/login.php"
-    $loginPacs = "smabasov"
-    $passwordPacs = "yGTvP8g_NC1"
     $urlInstruction = "https://conf.smclinic.ru/spaces/WTS/pages/121275145/%D0%90%D0%B4%D0%BC%D0%B8%D0%BD%D0%BA%D0%B0+PACS"
 
-    # 1. Сразу открываем страницу
     Start-Process $urlPacs
     Write-Host "`nОткрывается страница входа PACS..." -ForegroundColor Green
 
-    # 2. Копируем логин
-    Set-Clipboard -Value $loginPacs
-    Write-Host "Логин '$loginPacs' скопирован в буфер обмена." -ForegroundColor Green
-    Write-Host ""
-
-    # 3. Спрашиваем про пароль (без таймаута)
-    $copyPassword = Read-Host "Скопировать пароль в буфер обмена? (y/n)"
-    if ($copyPassword -match '^[yYдД]') {
-        Set-Clipboard -Value $passwordPacs
-        Write-Host "`nПароль скопирован в буфер обмена." -ForegroundColor Green
-    } else {
-        Write-Host "`nПароль не был скопирован." -ForegroundColor Yellow
-    }
-
-    # 4. Спрашиваем про инструкцию
-    $openInstruction = Read-Host "`nОткрыть инструкцию по настройке PACS? (y/n)"
+    $openInstruction = Read-Host "Открыть инструкцию по настройке PACS? (y/n)"
     if ($openInstruction -match '^[yYдД]') {
         Start-Process $urlInstruction
         Write-Host "`nИнструкция по настройке PACS открыта в браузере." -ForegroundColor Cyan
