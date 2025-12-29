@@ -1,9 +1,9 @@
 ﻿# =============================================
-# Умное подключение MSRA v2.0
+# Умное подключение MSRA v2.1
 # Поддержка: trueconf, pacs, ping, история и т.д.
 # =============================================
 
-$scriptVersion = "2.0"
+$scriptVersion = "2.1"
 
 # Настройки истории
 $historyFile = Join-Path $PSScriptRoot "msra_history.log"
