@@ -525,8 +525,11 @@ if ($input -ieq "update") {
 
     try {
         Write-Host "Загрузка новой версии..." -ForegroundColor Cyan
-        Invoke-WebRequest -Uri $repoUrl -OutFile $tempFile -UseBasicParsing -TimeoutSec 15
+       # Получаем системный прокси и его учётные данные
+$proxy = [System.Net.WebRequest]::GetSystemWebProxy()
+$proxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
 
+Invoke-WebRequest -Uri $repoUrl -OutFile $tempFile -UseBasicParsing -TimeoutSec 15 -Proxy $proxy
         # Сравним содержимое
         $currentContent = Get-Content $currentScript -Raw
         $newContent = Get-Content $tempFile -Raw
