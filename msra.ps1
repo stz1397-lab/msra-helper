@@ -525,12 +525,21 @@ if ($input -ieq "update") {
 
     try {
         Write-Host "Загрузка новой версии..." -ForegroundColor Cyan
-       # Получаем системный прокси и его учётные данные
-$proxy = [System.Net.WebRequest]::GetSystemWebProxy()
-$proxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
 
-Invoke-WebRequest -Uri $repoUrl -OutFile $tempFile -UseBasicParsing -TimeoutSec 15 -Proxy $proxy
-        # Сравним содержимое
+        # Определяем, используется ли прокси для этого URL
+        $systemProxy = [System.Net.WebRequest]::GetSystemWebProxy()
+        $proxyUri = $systemProxy.GetProxy($repoUrl)
+
+        if ($proxyUri -eq $repoUrl) {
+            # Прямое подключение (без прокси)
+            Invoke-WebRequest -Uri $repoUrl -OutFile $tempFile -UseBasicParsing -TimeoutSec 15
+        } else {
+            # Используем прокси с текущими учётными данными Windows
+            Write-Host "Используется прокси: $proxyUri" -ForegroundColor DarkGray
+            Invoke-WebRequest -Uri $repoUrl -OutFile $tempFile -UseBasicParsing -TimeoutSec 15 -Proxy $proxyUri -ProxyUseDefaultCredentials
+        }
+
+        # Сравниваем содержимое
         $currentContent = Get-Content $currentScript -Raw
         $newContent = Get-Content $tempFile -Raw
 
