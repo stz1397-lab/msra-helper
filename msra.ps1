@@ -27,7 +27,6 @@ function Show-Help {
     Write-Host "• pacs      - Открыть админку PACS" -ForegroundColor Gray
     Write-Host "• glpi      - Открыть GLPI" -ForegroundColor Gray
     Write-Host "• scanpass  - Пароль от учётки Scan" -ForegroundColor Gray
-    Write-Host "• sigur     - Пароль от СКУДа" -ForegroundColor Gray
     Write-Host "• distr     - Открыть папку дистрибутивов" -ForegroundColor Gray
     Write-Host "• restart   - Перезагрузка компьютера" -ForegroundColor Gray
     Write-Host "• exit      - Выход из программы" -ForegroundColor Gray
