@@ -3,7 +3,7 @@
 # Поддержка: trueconf, pacs, ping, история и т.д.
 # =============================================
 
-$scriptVersion = "2.1"
+$scriptVersion = "2.1"# --- Подключение по IP ---
 
 # Настройки истории
 $historyFile = Join-Path $PSScriptRoot "msra_history.log"
@@ -340,6 +340,55 @@ function Test-TCPPortWithFeedback {
             }
         } catch {
             Write-Host " Ошибка" -ForegroundColor Red
+        }
+    }
+
+    Write-Host "  → Устройство недоступно по TCP (порты $($Ports -join ', '))." -ForegroundColor Red
+    return @{
+        Success = $false
+        Port    = $null
+    }
+}
+
+function Test-TCPPortWithRetry {
+    param(
+        [string]$Target,
+        [int[]]$Ports = @(135, 445),
+        [int]$TimeoutMs = 1000,
+        [int]$Retries = 2,
+        [int]$DelayMs = 1500
+    )
+    Write-Host "`nПроверка доступности через TCP..." -ForegroundColor Magenta
+
+    for ($attempt = 0; $attempt -le $Retries; $attempt++) {
+        if ($attempt -gt 0) {
+            Write-Host "  → Повторная попытка ($attempt/$Retries)..." -ForegroundColor Yellow
+            Start-Sleep -Milliseconds $DelayMs
+        }
+
+        foreach ($port in $Ports) {
+            Write-Host "  Проверка порта $port..." -ForegroundColor Gray -NoNewline
+
+            try {
+                $tcp = New-Object System.Net.Sockets.TcpClient
+                $connect = $tcp.BeginConnect($Target, $port, $null, $null)
+                $wait = $connect.AsyncWaitHandle.WaitOne($TimeoutMs, $false)
+
+                if ($wait) {
+                    $tcp.EndConnect($connect)
+                    $tcp.Close()
+                    Write-Host " Успешно!" -ForegroundColor Green
+                    return @{
+                        Success = $true
+                        Port    = $port
+                    }
+                } else {
+                    $tcp.Close()
+                    Write-Host " Закрыт/недоступен" -ForegroundColor DarkGray
+                }
+            } catch {
+                Write-Host " Ошибка" -ForegroundColor Red
+            }
         }
     }
 
@@ -787,7 +836,7 @@ if ($input -ieq "pacs") {
 
 # --- Подключение по IP ---
 if ($ip) {
-    $checkResult = Test-TCPPortWithFeedback -Target $ip
+    $checkResult = Test-TCPPortWithFeedback -Target $ip -Retries 2 -DelayMs 1500
     $pingResult = $checkResult.Success
     if ($pingResult) {
         $octet3 = [int]($ip -split '\.')[2]
@@ -817,7 +866,7 @@ if ($ip) {
 }
 
 # --- Подключение по имени хоста ---
-$checkResult = Test-TCPPortWithFeedback -Target $input
+$checkResult = Test-TCPPortWithFeedback -Target $input -Retries 2 -DelayMs 1500
 $pingResult = $checkResult.Success
 if ($pingResult) {
     $resolved = Get-HostnameAndIP -target $input
