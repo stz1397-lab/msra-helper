@@ -519,7 +519,7 @@ while ($true) {
     try {
         Clear-Host
         Write-Host "╔══════════════════════════════════════╗" -ForegroundColor Cyan
-        Write-Host "║     Умное подключение MSRA v$scriptVersion      ║" -ForegroundColor Cyan
+        Write-Host "║     Умное подключение MSRA v$scriptVersion     ║" -ForegroundColor Cyan
         Write-Host "╚══════════════════════════════════════╝" -ForegroundColor Cyan
         Show-History
         $allConnections = Get-HistoryCount
