@@ -321,33 +321,44 @@ function Test-TCPPortWithFeedback {
     foreach ($port in $Ports) {
         Write-Host "  Проверка порта $port..." -ForegroundColor Gray -NoNewline
 
+        $tcp = $null
+        $result = $false
+
         try {
             $tcp = New-Object System.Net.Sockets.TcpClient
-            $connect = $tcp.BeginConnect($Target, $port, $null, $null)
-            $wait = $connect.AsyncWaitHandle.WaitOne($TimeoutMs, $false)
+            $asyncResult = $tcp.BeginConnect($Target, $port, $null, $null)
+            $waitHandle = $asyncResult.AsyncWaitHandle
 
-            if ($wait) {
-                $tcp.EndConnect($connect)
-                $tcp.Close()
-                Write-Host " Успешно!" -ForegroundColor Green
-                return @{
-                    Success = $true
-                    Port    = $port
+            try {
+                if ($waitHandle.WaitOne($TimeoutMs, $false)) {
+                    $tcp.EndConnect($asyncResult)
+                    $result = $true
                 }
-            } else {
-                $tcp.Close()
-                Write-Host " Закрыт/недоступен" -ForegroundColor DarkGray
+            } finally {
+                $waitHandle.Close()
             }
         } catch {
-            Write-Host " Ошибка" -ForegroundColor Red
+            $result = $false
+        } finally {
+            if ($tcp) {
+                try {
+                    if ($tcp.Connected) { $tcp.Client.Close() }
+                    $tcp.Close()
+                    $tcp.Dispose()
+                } catch {}
+            }
+        }
+
+        if ($result) {
+            Write-Host " Успешно!" -ForegroundColor Green
+            return @{ Success = $true; Port = $port }
+        } else {
+            Write-Host " Недоступен" -ForegroundColor DarkGray
         }
     }
 
     Write-Host "  → Устройство недоступно по TCP (порты $($Ports -join ', '))." -ForegroundColor Red
-    return @{
-        Success = $false
-        Port    = $null
-    }
+    return @{ Success = $false; Port = $null }
 }
 
 function Test-TCPPortWithRetry {
@@ -355,7 +366,7 @@ function Test-TCPPortWithRetry {
         [string]$Target,
         [int[]]$Ports = @(135, 445),
         [int]$TimeoutMs = 1000,
-        [int]$Retries = 2,
+        [int]$Retries = 1,      # ← уменьшено до 1 (итого 2 попытки)
         [int]$DelayMs = 1500
     )
     Write-Host "`nПроверка доступности через TCP..." -ForegroundColor Magenta
@@ -369,34 +380,45 @@ function Test-TCPPortWithRetry {
         foreach ($port in $Ports) {
             Write-Host "  Проверка порта $port..." -ForegroundColor Gray -NoNewline
 
+            $tcp = $null
+            $result = $false
+
             try {
                 $tcp = New-Object System.Net.Sockets.TcpClient
-                $connect = $tcp.BeginConnect($Target, $port, $null, $null)
-                $wait = $connect.AsyncWaitHandle.WaitOne($TimeoutMs, $false)
+                $asyncResult = $tcp.BeginConnect($Target, $port, $null, $null)
+                $waitHandle = $asyncResult.AsyncWaitHandle
 
-                if ($wait) {
-                    $tcp.EndConnect($connect)
-                    $tcp.Close()
-                    Write-Host " Успешно!" -ForegroundColor Green
-                    return @{
-                        Success = $true
-                        Port    = $port
+                try {
+                    if ($waitHandle.WaitOne($TimeoutMs, $false)) {
+                        $tcp.EndConnect($asyncResult)
+                        $result = $true
                     }
-                } else {
-                    $tcp.Close()
-                    Write-Host " Закрыт/недоступен" -ForegroundColor DarkGray
+                } finally {
+                    $waitHandle.Close()
                 }
             } catch {
-                Write-Host " Ошибка" -ForegroundColor Red
+                $result = $false
+            } finally {
+                if ($tcp) {
+                    try {
+                        if ($tcp.Connected) { $tcp.Client.Close() }
+                        $tcp.Close()
+                        $tcp.Dispose()
+                    } catch {}
+                }
+            }
+
+            if ($result) {
+                Write-Host " Успешно!" -ForegroundColor Green
+                return @{ Success = $true; Port = $port }
+            } else {
+                Write-Host " Недоступен" -ForegroundColor DarkGray
             }
         }
     }
 
     Write-Host "  → Устройство недоступно по TCP (порты $($Ports -join ', '))." -ForegroundColor Red
-    return @{
-        Success = $false
-        Port    = $null
-    }
+    return @{ Success = $false; Port = $null }
 }
 
 function Start-Ping {
@@ -836,7 +858,7 @@ if ($input -ieq "pacs") {
 
 # --- Подключение по IP ---
 if ($ip) {
-    $checkResult = Test-TCPPortWithFeedback -Target $ip -Retries 2 -DelayMs 1500
+    $checkResult = Test-TCPPortWithRetry -Target $ip
     $pingResult = $checkResult.Success
     if ($pingResult) {
         $octet3 = [int]($ip -split '\.')[2]
@@ -866,7 +888,7 @@ if ($ip) {
 }
 
 # --- Подключение по имени хоста ---
-$checkResult = Test-TCPPortWithFeedback -Target $input -Retries 2 -DelayMs 1500
+$checkResult = Test-TCPPortWithRetry -Target $input
 $pingResult = $checkResult.Success
 if ($pingResult) {
     $resolved = Get-HostnameAndIP -target $input
