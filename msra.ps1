@@ -77,7 +77,7 @@ function Remove-FailedHistoryEntries {
         } else {
             $removedCount = $history.Count - $filteredHistory.Count
             $filteredHistory | Set-Content $historyFile -Encoding utf8
-            Write-Host "Удалено $removedCount неудачных записей из истории." -ForegroundColor Green
+            Write-Host "Удалено $removedCount неудачных записей из истории." -ForegroundColor Red
         }
         Start-Sleep -Seconds 2
     } else {
@@ -287,7 +287,7 @@ function Update-KnownSubnetsInScript {
     param([int]$newSubnet)
     $scriptPath = $PSCommandPath
     if ([string]::IsNullOrEmpty($scriptPath)) {
-        Write-Host "Автоматическое обновление возможно только при запуске скрипта из файла!" -ForegroundColor Red
+        Write-Host "Автоматическое обновление возможно только при запуске скрипта из файла! Создайте ярлык на .ps1 файл и попробуйте снова" -ForegroundColor Red
         return
     }
     $scriptContent = Get-Content $scriptPath -Raw
