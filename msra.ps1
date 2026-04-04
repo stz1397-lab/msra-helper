@@ -1,9 +1,9 @@
 ﻿# =============================================
-# Умное подключение MSRA v2.15
+# Умное подключение MSRA v2.17
 # Поддержка: trueconf, pacs, ping, история и т.д.
 # =============================================
 
-$scriptVersion = "2.15"# --- Подключение по IP ---
+$scriptVersion = "2.17"# --- Подключение по IP ---
 
 # Настройки истории
 $historyFile = Join-Path $PSScriptRoot "msra_history.log"
@@ -41,8 +41,17 @@ function Show-History {
             Write-Host "`nПоследние подключения:" -ForegroundColor Yellow
             Write-Host ""
             $history | Select-Object -Last 10 | ForEach-Object {
-                $color = if ($_ -match "Успешно") { "Green" } else { "Red" }
-                Write-Host " $_" -ForegroundColor $color
+                $line = $_
+                $baseColor = if ($line -match "Успешно") { "Green" } else { "Red" }
+                
+                if ($line -match '(.+)(\s+\|\s+Подключение\s+#\d+)$') {
+                    $mainPart = $matches[1]
+                    $suffix  = $matches[2]
+                    Write-Host " $mainPart" -ForegroundColor $baseColor -NoNewline
+                    Write-Host $suffix -ForegroundColor Yellow
+                } else {
+                    Write-Host " $line" -ForegroundColor $baseColor
+                }
             }
             Write-Host ""
         }
@@ -156,9 +165,19 @@ function Show-FullHistory {
         $history = Get-Content $historyFile
         if ($history.Count -gt 0) {
             $history | ForEach-Object {
-                $color = if ($_ -match "Успешно") { "Green" } else { "Red" }
-                Write-Host " $_" -ForegroundColor $color
+                $line = $_
+                $baseColor = if ($line -match "Успешно") { "Green" } else { "Red" }
+                
+                if ($line -match '(.+)(\s+\|\s+Подключение\s+#\d+)$') {
+                    $mainPart = $matches[1]
+                    $suffix  = $matches[2]
+                    Write-Host " $mainPart" -ForegroundColor $baseColor -NoNewline
+                    Write-Host $suffix -ForegroundColor Yellow
+                } else {
+                    Write-Host " $line" -ForegroundColor $baseColor
+                }
             }
+
             $total = $history.Count
             $success = ($history -match "Успешно").Count
             $failed = $total - $success
@@ -171,58 +190,32 @@ function Show-FullHistory {
             $hasDuplicates = Test-ConsecutiveDuplicates
 
             Write-Host "`nДополнительные действия:" -ForegroundColor Yellow
-            if ($hasFailed) {
-                Write-Host "Del     - Удалить все неудачные подключения"
-            }
-            if ($hasDuplicates) {
-                Write-Host "Deldbl  - Удалить подряд идущие дубликаты"
-            }
-            if ($hasFailed -and $hasDuplicates) {
-                Write-Host "Delall  - Удалить и неудачные, и дубликаты"
-            }
-
+            if ($hasFailed) { Write-Host "Del     - Удалить все неудачные подключения" }
+            if ($hasDuplicates) { Write-Host "Deldbl  - Удалить подряд идущие дубликаты" }
+            if ($hasFailed -and $hasDuplicates) { Write-Host "Delall  - Удалить и неудачные, и дубликаты" }
             Write-Host "Enter   - Вернуться в меню"
 
             $choice = Read-Host "`nВыбор"
             switch ($choice.Trim().ToLower()) {
-                { $_ -in "del", "вуд" } {
-                    Remove-FailedHistoryEntries
-                }
-                "deldbl" {
-                    Remove-DuplicateHistoryEntries
-                }
+                { $_ -in "del", "вуд" } { Remove-FailedHistoryEntries }
+                "deldbl" { Remove-DuplicateHistoryEntries }
                 { $_ -in "delall", "вудфдд" } {
-                    # Удаляем всё: сначала неудачи, потом дубликаты
                     if (Test-Path $historyFile) {
-                        # Удаляем неудачи
                         $historyBefore = Get-Content $historyFile
                         $failedCount = ($historyBefore -match "Нет пинга").Count
-                        if ($failedCount -gt 0) {
-                            Remove-FailedHistoryEntries
-                        }
-
-                        # Теперь удаляем дубликаты (уже из обновлённого файла)
-                        if (Test-ConsecutiveDuplicates) {
-                            Remove-DuplicateHistoryEntries
-                        }
-
-                        # Считаем итоговое удаление
+                        if ($failedCount -gt 0) { Remove-FailedHistoryEntries }
+                        if (Test-ConsecutiveDuplicates) { Remove-DuplicateHistoryEntries }
                         $historyAfter = Get-Content $historyFile
                         $removedTotal = $historyBefore.Count - $historyAfter.Count
-                        if ($removedTotal -gt 0) {
-                            Write-Host "Всего удалено записей: $removedTotal" -ForegroundColor Cyan
-                        } else {
-                            Write-Host "Нечего удалять." -ForegroundColor Yellow
-                        }
+                        if ($removedTotal -gt 0) { Write-Host "Всего удалено записей: $removedTotal" -ForegroundColor Cyan }
+                        else { Write-Host "Нечего удалять." -ForegroundColor Yellow }
                         Start-Sleep -Seconds 2
                     } else {
                         Write-Host "Файл истории не найден." -ForegroundColor Red
                         Start-Sleep -Seconds 2
                     }
                 }
-                default {
-                    # Возвращаемся в меню
-                }
+                default { }
             }
         } else {
             Write-Host "История пуста." -ForegroundColor Yellow
@@ -238,18 +231,51 @@ function Add-HistoryEntry {
     param(
         [string]$target,
         [bool]$isHostname,
-        [bool]$success
+        [bool]$success,
+        [int]$connectionCount = 0  # ← Новый параметр
     )
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $type = if ($isHostname) { "Хост" } else { "IP" }
     $status = if ($success) { "Успешно" } else { "Нет пинга" }
-    $entry = "$timestamp | $type | $target | $status"
+    
+    # Если это успешное повторное подключение — добавляем номер в запись
+    $suffix = ""
+    if ($success -and $connectionCount -gt 0) {
+        $suffix = " | Подключение #$($connectionCount + 1)"
+    }
+    
+    $entry = "$timestamp | $type | $target | $status$suffix"
+    
     $currentHistory = @()
     if (Test-Path $historyFile) {
         $currentHistory = Get-Content $historyFile
     }
     $newHistory = ($currentHistory -join "`n") + "`n" + $entry
     ($newHistory -split "`n" | Where-Object { $_ -ne "" } | Select-Object -Last $maxHistoryEntries) -join "`n" | Out-File $historyFile -Encoding utf8
+}
+
+function Get-ConnectionCount {
+    param(
+        [string]$target
+    )
+    if (-not (Test-Path $historyFile)) { return 0 }
+    
+    $history = Get-Content $historyFile
+    $count = 0
+    
+    foreach ($line in $history) {
+        $fields = $line.Trim() -split '\s*\|\s*'
+        if ($fields.Count -eq 4) {
+            $histTarget = $fields[2].Trim()
+            $status = $fields[3].Trim()
+            
+            # Сравниваем: точное совпадение ИЛИ если целевой IP содержится в записи
+            if ($status -eq "Успешно" -and ($histTarget -eq $target -or $histTarget -like "*$target*")) {
+                $count++
+            }
+        }
+    }
+    return $count
 }
 
 function Get-HostnameAndIP {
@@ -532,381 +558,185 @@ while ($true) {
         Write-Host "• help → Справка по дополнительным командам"
         Write-Host "• his → Показать всю историю подключений"
         Write-Host "• clear → Очистить историю подключений"
-        $input = Read-Host "Введите данные (Enter для выхода)"
-        if ([string]::IsNullOrEmpty($input)) { break }
+        
+        $userInput = Read-Host "Введите данные (Enter для выхода)"
+        if ([string]::IsNullOrEmpty($userInput)) { break }
 
-        # === Обработка специальных команд (ПОРЯДОК ВАЖЕН!) ===
+        # === Команды ===
+        if ($userInput -eq "help" -or $userInput -eq "рудз") { Show-Help; continue }
+        if ($userInput -eq "his" -or $userInput -eq "ршы") { Clear-Host; Write-Host "── Полная история подключений ──" -ForegroundColor Cyan; Show-FullHistory; continue }
+        if ($userInput -eq "clear" -or $userInput -eq "сдефк") { Clear-HistoryFile; continue }
 
-        if ($input -eq "help" -or $input -eq "рудз") {
-            Show-Help
+        if ($userInput -ieq "trueconf") {
+            Start-Process "http://ssrv.lan.smclinic.ru/admin/general/info/"
+            Write-Host "`nОткрывается страница входа TrueConf..." -ForegroundColor Green
+            Set-Clipboard -Value "trueconftech"
+            Write-Host "Логин скопирован." -ForegroundColor Green
+            if ((Read-Host "Скопировать пароль? (y/n)") -match '^[yYдД]') { Set-Clipboard -Value "Beif8uwi"; Write-Host "Пароль скопирован." -ForegroundColor Green }
+            Write-Host "Возвращаемся в меню..." -ForegroundColor Green; Start-Sleep -Seconds 2; continue
+        }
+
+        if ($userInput -ieq "update") {
+            $currentScript = $PSCommandPath
+            if ([string]::IsNullOrEmpty($currentScript)) { Write-Host "Обновление невозможно: скрипт запущен не из файла." -ForegroundColor Red; Read-Host "Нажмите Enter"; continue }
+            $repoUrl = "https://raw.githubusercontent.com/stz1397-lab/msra-helper/main/msra.ps1"
+            $tempFile = [System.IO.Path]::GetTempFileName()
+            try {
+                Write-Host "Загрузка новой версии..." -ForegroundColor Cyan
+                $proxy = [System.Net.WebRequest]::GetSystemWebProxy().GetProxy($repoUrl)
+                if ($proxy -eq $repoUrl) { Invoke-WebRequest -Uri $repoUrl -OutFile $tempFile -UseBasicParsing -TimeoutSec 15 }
+                else { Invoke-WebRequest -Uri $repoUrl -OutFile $tempFile -UseBasicParsing -TimeoutSec 15 -Proxy $proxy -ProxyUseDefaultCredentials }
+                
+                if ((Get-Content $currentScript -Raw) -eq (Get-Content $tempFile -Raw)) { Write-Host "У вас уже последняя версия." -ForegroundColor Green }
+                else {
+                    Copy-Item $currentScript "$currentScript.bak" -Force
+                    Copy-Item $tempFile $currentScript -Force
+                    Write-Host "Скрипт обновлён! Перезапуск..." -ForegroundColor Green; Start-Sleep -Seconds 1
+                    & $currentScript; exit
+                }
+            } catch { Write-Host "Ошибка обновления: $_" -ForegroundColor Red }
+            finally { if (Test-Path $tempFile) { Remove-Item $tempFile -Force } }
+            Read-Host "Нажмите Enter, чтобы вернуться в меню"; continue
+        }
+
+        if ($userInput -ieq "glpi") { Start-Process "https://glpi.smclinic.ru/front/ticket.php"; Write-Host "GLPI запущен" -ForegroundColor Green; Start-Sleep -Seconds 2; continue }
+        if ($userInput -ieq "restart") {
+            if ((Get-CimInstance Win32_ComputerSystem).NumberOfUsers -gt 1) {
+                Write-Warning "Есть активные пользователи. Продолжить?"
+                if ((Read-Host "(y/n)") -notmatch '^[yYдД]') { Write-Host "Отмена." -ForegroundColor Yellow; Start-Sleep 2; continue }
+            }
+            try { Restart-Computer -Force; Write-Host "Перезагрузка..." -ForegroundColor Green } catch { Write-Host "Ошибка: $_" -ForegroundColor Red }
+            Start-Sleep 2; continue
+        }
+        if ($userInput -ieq "exit") { exit }
+        if ($userInput -ieq "scanpass") { "53807553QaZ" | Set-Clipboard; Write-Host "Пароль Scan скопирован"; Read-Host "Enter"; continue }
+        if ($userInput -ieq "sigur")   { "rt54de1z"      | Set-Clipboard; Write-Host "Пароль Sigur скопирован"; Read-Host "Enter"; continue }
+        if ($userInput -ieq "distr")   { Invoke-Item "\\fileserver\distr$"; continue }
+        if ($userInput -ieq "pacs") {
+            Start-Process "http://pacs-2.lan.smclinic.ru/pacs/login.php"
+            Write-Host "PACS открыт." -ForegroundColor Green
+            if ((Read-Host "Открыть инструкцию? (y/n)") -match '^[yYдД]') { Start-Process "https://conf.smclinic.ru/spaces/WTS/pages/121275145/%D0%90%D0%B4%D0%BC%D0%B8%D0%BD%D0%BA%D0%B0+PACS" }
+            Start-Sleep 2; continue
+        }
+
+        # === Ping ===
+        $isPing = $false; $contPing = $false
+        if ($userInput -match '^ping\s+(.+?)(\s+-t)?$') {
+            $isPing = $true; $contPing = $matches[2] -ne $null; $userInput = $matches[1].Trim()
+        }
+        if ($isPing) {
+            $target = $null
+            if ($userInput -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') { $target = $userInput }
+            elseif ($userInput -match '^[\d\.]+$') {
+                if ($userInput -match '^(\d{1,3})\.(\d{1,3})$') {
+                    $o3=[int]$matches[1]; $o4=[int]$matches[2]
+                    if ($o3 -gt 255 -or $o4 -gt 255) { Write-Host "Ошибка IP!" -ForegroundColor Red; Start-Sleep 2; continue }
+                    $target = "192.168.$o3.$o4"
+                } elseif ($userInput -match '^(\d+)$') {
+                    $num = [int]$userInput.Trim()
+                    if ($num -le 19) { Write-Host "Ошибка ввода" -ForegroundColor Red; Start-Sleep 2; continue }
+                    $subs = Get-PossibleSubnets -number $num -knownSubnets $knownSubnets
+                    if ($subs.Count -gt 1) {
+                        Write-Host "`nНесколько подсетей:" -ForegroundColor Yellow
+                        for($i=0;$i -lt $subs.Count;$i++) {
+                            $rem = $num.ToString().Substring($subs[$i].ToString().Length)
+                            Write-Host "$($i+1). 192.168.$($subs[$i]).$([int]$rem)" -ForegroundColor Gray
+                        }
+                        Write-Host "$($subs.Count+1). Отмена" -ForegroundColor DarkGray
+                        $ch = Read-Host "Выбор"
+                        if ($ch -match '^\d+$' -and [int]$ch -ge 1 -and [int]$ch -le $subs.Count) {
+                            $sel = $subs[[int]$ch-1]; $rem = $num.ToString().Substring($sel.ToString().Length)
+                            $target = "192.168.$sel.$([int]$rem)"
+                        } elseif ([int]$ch -eq $subs.Count+1) { continue }
+                        else { continue }
+                    } elseif ($subs.Count -eq 1) {
+                        $rem = $num.ToString().Substring($subs[0].ToString().Length)
+                        $target = "192.168.$($subs[0]).$([int]$rem)"
+                    } else { Write-Host "Подсеть не найдена!" -ForegroundColor Red; Start-Sleep 2; continue }
+                } else { Write-Host "Ошибка ввода!" -ForegroundColor Red; Start-Sleep 2; continue }
+            } else {
+                $res = Get-HostnameAndIP -target $userInput
+                if ($res.IP) { $target = $res.IP } else { Write-Host "Хост не найден!" -ForegroundColor Red; Start-Sleep 2; continue }
+            }
+            Start-Ping -Target $target -Continuous:$contPing
             continue
         }
 
-        if ($input -eq "his" -or $input -eq "ршы") {
-            Clear-Host
-            Write-Host "── Полная история подключений ──" -ForegroundColor Cyan
-            Show-FullHistory
+        # === Преобразование в IP ===
+        $ip = $null
+        if ($userInput -match '^[\d\.]+$') {
+            if ($userInput -match '^(\d{1,3})\.(\d{1,3})$') {
+                $o3=[int]$matches[1]; $o4=[int]$matches[2]
+                if ($o3 -gt 255 -or $o4 -gt 255) { Write-Host "Ошибка IP!" -ForegroundColor Red; Start-Sleep 2; continue }
+                $ip = "192.168.$o3.$o4"
+            } elseif ($userInput -match '^(\d+)$') {
+                $num = [int]$userInput.Trim()
+                if ($num -le 19) { Write-Host "Ошибка ввода" -ForegroundColor Red; Start-Sleep 2; continue }
+                $subs = Get-PossibleSubnets -number $num -knownSubnets $knownSubnets
+                if ($subs.Count -gt 1) {
+                    Write-Host "`nНесколько подсетей:" -ForegroundColor Yellow
+                    for($i=0;$i -lt $subs.Count;$i++) {
+                        $rem = $num.ToString().Substring($subs[$i].ToString().Length)
+                        Write-Host "$($i+1). 192.168.$($subs[$i]).$([int]$rem)" -ForegroundColor Gray
+                    }
+                    Write-Host "$($subs.Count+1). Отмена" -ForegroundColor DarkGray
+                    $ch = Read-Host "Выбор"
+                    if ($ch -match '^\d+$' -and [int]$ch -ge 1 -and [int]$ch -le $subs.Count) {
+                        $sel = $subs[[int]$ch-1]; $rem = $num.ToString().Substring($sel.ToString().Length)
+                        $ip = "192.168.$sel.$([int]$rem)"
+                    } elseif ([int]$ch -eq $subs.Count+1) { continue }
+                    else { continue }
+                } elseif ($subs.Count -eq 1) {
+                    $rem = $num.ToString().Substring($subs[0].ToString().Length)
+                    $ip = "192.168.$($subs[0]).$([int]$rem)"
+                } else { Write-Host "Подсеть не найдена!" -ForegroundColor Red; Start-Sleep 2; continue }
+            } else { Write-Host "Ошибка ввода!" -ForegroundColor Red; Start-Sleep 2; continue }
+        }
+
+        # === Подключение по IP ===
+        if ($ip) {
+            $check = Test-TCPPortWithRetry -Target $ip
+            if ($check.Success) {
+                $oct3 = [int]($ip -split '\.')[2]
+                if (-not ($knownSubnets -contains $oct3)) {
+                    if ((Read-Host "Новая подсеть $oct3. Добавить? (y/n)") -match '^[yYдД]') {
+                        Update-KnownSubnetsInScript -newSubnet $oct3
+                        $knownSubnets += $oct3; $knownSubnets = $knownSubnets | Sort-Object
+                        Write-Host "Подсеть добавлена." -ForegroundColor Cyan; Start-Sleep 3
+                    }
+                }
+                $res = Get-HostnameAndIP -target $ip
+                $hostN = $res.Hostname
+                $disp = if ($hostN) { "$ip ($hostN)" } else { $ip }
+                $cnt = Get-ConnectionCount -target $ip
+                Write-Host "Успешно через порт $($check.Port)! Подключаемся..." -ForegroundColor Green
+                Add-HistoryEntry -target $disp -isHostname $false -success $true -connectionCount $cnt
+                Start-Process "msra.exe" -ArgumentList "/offerra $ip"
+                Start-Sleep -Seconds 2
+            } else {
+                Add-HistoryEntry -target $ip -isHostname $false -success $false
+                Start-Sleep -Seconds 2
+            }
             continue
         }
 
-        if ($input -eq "clear" -or $input -eq "сдефк") {
-            Clear-HistoryFile
-            continue
-        }
-
-        if ($input -ieq "trueconf") {
-    $urlTrueConf = "http://ssrv.lan.smclinic.ru/admin/general/info/"
-    $loginTrueConf = "trueconftech"
-    $passwordTrueConf = "Beif8uwi"
-
-    # 1. Сразу открываем страницу
-    Start-Process $urlTrueConf
-    Write-Host "`nОткрывается страница входа TrueConf..." -ForegroundColor Green
-
-    # 2. Копируем логин
-    Set-Clipboard -Value $loginTrueConf
-    Write-Host "Логин '$loginTrueConf' скопирован в буфер обмена." -ForegroundColor Green
-    Write-Host ""
-
-    # 3. Спрашиваем про пароль (без таймаута)
-    $copyPassword = Read-Host "Скопировать пароль в буфер обмена? (y/n)"
-    if ($copyPassword -match '^[yYдД]') {
-        Set-Clipboard -Value $passwordTrueConf
-        Write-Host "`nПароль скопирован в буфер обмена." -ForegroundColor Green
-    } else {
-        Write-Host "`nПароль не был скопирован." -ForegroundColor Yellow
-    }
-
-    Write-Host "`nГотово. Возвращаемся в меню..." -ForegroundColor Green
-    Start-Sleep -Seconds 2
-    continue
-}
-
-if ($input -ieq "update") {
-    $currentScript = $PSCommandPath
-    if ([string]::IsNullOrEmpty($currentScript)) {
-        Write-Host "Обновление невозможно: скрипт запущен не из файла." -ForegroundColor Red
-        Read-Host "Нажмите Enter"
-        continue
-    }
-
-    $repoUrl = "https://raw.githubusercontent.com/stz1397-lab/msra-helper/main/msra.ps1"
-    $tempFile = [System.IO.Path]::GetTempFileName()
-
-    try {
-        Write-Host "Загрузка новой версии..." -ForegroundColor Cyan
-
-        # Определяем, используется ли прокси для этого URL
-        $systemProxy = [System.Net.WebRequest]::GetSystemWebProxy()
-        $proxyUri = $systemProxy.GetProxy($repoUrl)
-
-        if ($proxyUri -eq $repoUrl) {
-            # Прямое подключение (без прокси)
-            Invoke-WebRequest -Uri $repoUrl -OutFile $tempFile -UseBasicParsing -TimeoutSec 15
+        # === Подключение по имени хоста ===
+        $check = Test-TCPPortWithRetry -Target $userInput
+        if ($check.Success) {
+            $res = Get-HostnameAndIP -target $userInput
+            $ipRes = $res.IP
+            $disp = if ($ipRes) { "$userInput ($ipRes)" } else { $userInput }
+            $cnt = Get-ConnectionCount -target $userInput
+            Write-Host "Успешно через порт $($check.Port)! Подключаемся..." -ForegroundColor Green
+            Add-HistoryEntry -target $disp -isHostname $true -success $true -connectionCount $cnt
+            Start-Process "msra.exe" -ArgumentList "/offerra $userInput"
+            Start-Sleep -Seconds 2
         } else {
-            # Используем прокси с текущими учётными данными Windows
-            Write-Host "Используется прокси: $proxyUri" -ForegroundColor DarkGray
-            Invoke-WebRequest -Uri $repoUrl -OutFile $tempFile -UseBasicParsing -TimeoutSec 15 -Proxy $proxyUri -ProxyUseDefaultCredentials
-        }
-
-        # Сравниваем содержимое
-        $currentContent = Get-Content $currentScript -Raw
-        $newContent = Get-Content $tempFile -Raw
-
-        if ($currentContent -eq $newContent) {
-            Write-Host "У вас уже установлена последняя версия." -ForegroundColor Green
-        } else {
-            $backup = "$currentScript.bak"
-            Copy-Item $currentScript $backup -Force
-            Write-Host "Создана резервная копия: $backup" -ForegroundColor Yellow
-
-            Copy-Item $tempFile $currentScript -Force
-            Write-Host "Скрипт обновлён! Перезапуск..." -ForegroundColor Green
-            Start-Sleep -Seconds 1
-            & $currentScript
-            exit
+            Add-HistoryEntry -target $userInput -isHostname $true -success $false
+            Start-Sleep -Seconds 2
         }
     } catch {
-        Write-Host "Ошибка при обновлении: $_" -ForegroundColor Red
-    } finally {
-        if (Test-Path $tempFile) { Remove-Item $tempFile -Force }
-    }
-
-    Read-Host "Нажмите Enter, чтобы вернуться в меню"
-    continue
-}
-
-        if ($input -ieq "glpi") {
-        $urlGLPI = "https://glpi.smclinic.ru/front/ticket.php"
-        Start-Process $urlGLPI
-        Write-Host "GLPI запущен" -ForegroundColor Green
-        Start-Sleep -Seconds 2
-        continue
-        }
-
-        if ($input -ieq "restart") {
-    # Проверяем, есть ли активные сессии
-    $sessions = (Get-CimInstance -ClassName Win32_ComputerSystem).NumberOfUsers
-    if ($sessions -gt 1) {
-        Write-Warning "В системе есть активные пользователи. Перезагрузка может быть отклонена."
-        $confirm = Read-Host "Всё равно продолжить? (y/n)"
-        if ($confirm -notmatch '^(y|yes|д|да)$') {
-            Write-Host "Отмена перезагрузки." -ForegroundColor Yellow
-            Start-Sleep -Seconds 2
-            continue
-        }
-    }
-
-    try {
-        Write-Host "Инициируется перезагрузка..." -ForegroundColor Magenta
-        Restart-Computer -Force -ErrorAction Stop
-        Write-Host "Перезагрузка выполнена." -ForegroundColor Green
+        Write-Host "Ошибка: $_" -ForegroundColor Red
         Start-Sleep -Seconds 2
     }
-    catch {
-        Write-Host "Ошибка при перезагрузке: $($_.Exception.Message)" -ForegroundColor Red
-        Start-Sleep -Seconds 3
-    }
-    continue
 }
-
-        if ($input -ieq "exit") {
-        exit
-        }
-
-        if ($input -ieq "scanpass") {
-        $scanPass = "53807553QaZ"
-        Write-Host ""
-        Write-Host $scanPass
-        $scanPass | Set-Clipboard
-        Write-Host ""
-        Write-Host "Пароль в буфере обмена"
-        Read-Host "Нажмите Enter, чтобы вернуться в главное меню"
-        continue
-        }
-
-        if ($input -ieq "sigur") {
-        $sigurpass = "rt54de1z"
-        Write-Host ""
-        Write-Host $sigurpass
-        $sigurpass | Set-Clipboard
-        Write-Host ""
-        Write-Host "Пароль в буфере обмена"
-        Read-Host "Нажмите Enter, чтобы вернуться в главное меню"
-        continue
-        }
-
-        if ($input -ieq "distr") {
-        Invoke-Item "\\fileserver\distr$"
-        continue
-}
-
-        
-if ($input -ieq "pacs") {
-    $urlPacs = "http://pacs-2.lan.smclinic.ru/pacs/login.php"
-    $urlInstruction = "https://conf.smclinic.ru/spaces/WTS/pages/121275145/%D0%90%D0%B4%D0%BC%D0%B8%D0%BD%D0%BA%D0%B0+PACS"
-
-    Start-Process $urlPacs
-    Write-Host "`nОткрывается страница входа PACS..." -ForegroundColor Green
-
-    $openInstruction = Read-Host "Открыть инструкцию по настройке PACS? (y/n)"
-    if ($openInstruction -match '^[yYдД]') {
-        Start-Process $urlInstruction
-        Write-Host "`nИнструкция по настройке PACS открыта в браузере." -ForegroundColor Cyan
-    } else {
-        Write-Host "`nИнструкция не будет открыта." -ForegroundColor Yellow
-    }
-
-    Write-Host "`nГотово. Возвращаемся в меню..." -ForegroundColor Green
-    Start-Sleep -Seconds 2
-    continue
-}
-
-        # Обработка команды ping
-        $isPingCommand = $false
-        $continuousPing = $false
-        $ip = $null
-        if ($input -match '^ping\s+(.+?)(\s+-t)?$') {
-            $isPingCommand = $true
-            $continuousPing = $matches[2] -ne $null
-            $input = $matches[1].Trim()
-        }
-
-        if ($isPingCommand) {
-            $target = $null
-
-            if ($input -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') {
-                $target = $input
-            }
-            elseif ($input -match '^[\d\.]+$') {
-                if ($input -match '^(\d{1,3})\.(\d{1,3})$') {
-                    $octet3 = [int]$matches[1]
-                    $octet4 = [int]$matches[2]
-                    if ($octet3 -gt 255 -or $octet4 -gt 255) {
-                        Write-Host "Ошибка: неверный IP!" -ForegroundColor Red
-                        Start-Sleep -Seconds 2
-                        continue
-                    }
-                    $target = "192.168.$octet3.$octet4"
-                }
-                elseif ($input -match '^(\d+)$') {
-                    $num = [int]$input.Trim()
-                    if ($num -ge 0 -and $num -le 19) {
-                        Write-Host "Ошибка ввода" -ForegroundColor Red
-                        Start-Sleep -Seconds 2
-                        continue
-                    }
-                    $possibleSubnets = Get-PossibleSubnets -number $num -knownSubnets $knownSubnets
-                    if ($possibleSubnets.Count -gt 1) {
-                        Write-Host "`nОбнаружено несколько подсетей:" -ForegroundColor Yellow
-                        for ($i = 0; $i -lt $possibleSubnets.Count; $i++) {
-                            $subnet = $possibleSubnets[$i]
-                            $remainingDigits = $num.ToString().Substring($subnet.ToString().Length)
-                            $exampleIP = "192.168.$subnet.$([int]$remainingDigits)"
-                            Write-Host "$($i+1). $exampleIP" -ForegroundColor Gray
-                        }
-                        Write-Host "$($possibleSubnets.Count+1). Отмена" -ForegroundColor DarkGray
-                        $choice = Read-Host "Выберите вариант (1-$($possibleSubnets.Count+1))"
-                        if ($choice -match '^\d+$' -and [int]$choice -ge 1 -and [int]$choice -le $possibleSubnets.Count+1) {
-                            if ([int]$choice -eq $possibleSubnets.Count+1) { continue }
-                            $selectedSubnet = $possibleSubnets[[int]$choice - 1]
-                            $remainingDigits = $num.ToString().Substring($selectedSubnet.ToString().Length)
-                            $target = "192.168.$selectedSubnet.$([int]$remainingDigits)"
-                        } else { continue }
-                    } elseif ($possibleSubnets.Count -eq 1) {
-                        $subnet = $possibleSubnets[0]
-                        $remainingDigits = $num.ToString().Substring($subnet.ToString().Length)
-                        $target = "192.168.$subnet.$([int]$remainingDigits)"
-                    } else {
-                        Write-Host "Не найдено подходящих подсетей для '$num'!" -ForegroundColor Red
-                        Start-Sleep -Seconds 2
-                        continue
-                    }
-                } else {
-                    Write-Host "Ошибка: неверный ввод!" -ForegroundColor Red
-                    Start-Sleep -Seconds 2
-                    continue
-                }
-            }
-            else {
-                $resolved = Get-HostnameAndIP -target $input
-                if ($resolved.IP) {
-                    $target = $resolved.IP
-                } else {
-                    Write-Host "Хост не найден! '$input'" -ForegroundColor Red
-                    Start-Sleep -Seconds 2
-                    continue
-                }
-            }
-
-            Start-Ping -Target $target -Continuous:$continuousPing
-            continue
-        }
-
-        # --- Основная логика: преобразование в IP ---
-        $ip = $null
-        if ($input -match '^[\d\.]+$') {
-            if ($input -match '^(\d{1,3})\.(\d{1,3})$') {
-                $octet3 = [int]$matches[1]
-                $octet4 = [int]$matches[2]
-                if ($octet3 -gt 255 -or $octet4 -gt 255) {
-                    Write-Host "Ошибка: неверный IP!" -ForegroundColor Red
-                    Start-Sleep -Seconds 2
-                    continue
-                }
-                $ip = "192.168.$octet3.$octet4"
-            }
-            elseif ($input -match '^(\d+)$') {
-                $num = [int]$input.Trim()
-                if ($num -ge 0 -and $num -le 19) {
-                    Write-Host "Ошибка ввода" -ForegroundColor Red
-                    Start-Sleep -Seconds 2
-                    continue
-                }
-                $possibleSubnets = Get-PossibleSubnets -number $num -knownSubnets $knownSubnets
-                if ($possibleSubnets.Count -gt 1) {
-                    Write-Host "`nОбнаружено несколько подсетей:" -ForegroundColor Yellow
-                    for ($i = 0; $i -lt $possibleSubnets.Count; $i++) {
-                        $subnet = $possibleSubnets[$i]
-                        $remainingDigits = $num.ToString().Substring($subnet.ToString().Length)
-                        $exampleIP = "192.168.$subnet.$([int]$remainingDigits)"
-                        Write-Host "$($i+1). $exampleIP" -ForegroundColor Gray
-                    }
-                    Write-Host "$($possibleSubnets.Count+1). Отмена" -ForegroundColor DarkGray
-                    $choice = Read-Host "Выберите вариант (1-$($possibleSubnets.Count+1))"
-                    if ($choice -match '^\d+$' -and [int]$choice -ge 1 -and [int]$choice -le $possibleSubnets.Count+1) {
-                        if ([int]$choice -eq $possibleSubnets.Count+1) { continue }
-                        $selectedSubnet = $possibleSubnets[[int]$choice - 1]
-                        $remainingDigits = $num.ToString().Substring($selectedSubnet.ToString().Length)
-                        $ip = "192.168.$selectedSubnet.$([int]$remainingDigits)"
-                    } else { continue }
-                } elseif ($possibleSubnets.Count -eq 1) {
-                    $subnet = $possibleSubnets[0]
-                    $remainingDigits = $num.ToString().Substring($subnet.ToString().Length)
-                    $ip = "192.168.$subnet.$([int]$remainingDigits)"
-                } else {
-                    Write-Host "Не найдено подходящих подсетей для '$num'!" -ForegroundColor Red
-                    Start-Sleep -Seconds 2
-                    continue
-                }
-            } else {
-                Write-Host "Ошибка: неверный ввод!" -ForegroundColor Red
-                Start-Sleep -Seconds 2
-                continue
-            }
-        }
-
-# --- Подключение по IP ---
-if ($ip) {
-    $checkResult = Test-TCPPortWithRetry -Target $ip
-    $pingResult = $checkResult.Success
-    if ($pingResult) {
-        $octet3 = [int]($ip -split '\.')[2]
-        if (-not ($knownSubnets -contains $octet3)) {
-            $answer = Read-Host "Обнаружена новая подсеть $octet3. Добавить её в список известных? (y/n)"
-            if ($answer -match '^[yYдД]') {
-                Update-KnownSubnetsInScript -newSubnet $octet3
-                $knownSubnets += $octet3
-                $knownSubnets = $knownSubnets | Sort-Object
-                Write-Host "Подсеть $octet3 добавлена." -ForegroundColor Cyan
-                Start-Sleep -Seconds 3
-            }
-        }
-        $resolved = Get-HostnameAndIP -target $ip
-        $hostname = $resolved.Hostname
-        $displayTarget = if ($hostname) { "$ip ($hostname)" } else { $ip }
-        $viaPort = $checkResult.Port
-        Write-Host "Успешно через порт $viaPort! Подключаемся..." -ForegroundColor Green
-        Add-HistoryEntry -target $displayTarget -isHostname $false -success $true
-        Start-Process "msra.exe" -ArgumentList "/offerra $ip"
-        Start-Sleep -Seconds 2
-    } else {
-        Add-HistoryEntry -target $ip -isHostname $false -success $false
-        Start-Sleep -Seconds 2
-    }
-    continue
-}
-
-# --- Подключение по имени хоста ---
-$checkResult = Test-TCPPortWithRetry -Target $input
-$pingResult = $checkResult.Success
-if ($pingResult) {
-    $resolved = Get-HostnameAndIP -target $input
-    $ip = $resolved.IP
-    $hostname = $resolved.Hostname
-    $displayTarget = if ($ip) { "$input ($ip)" } else { $input }
-    $viaPort = $checkResult.Port
-    Write-Host "Успешно через порт $viaPort! Подключаемся..." -ForegroundColor Green
-    Add-HistoryEntry -target $displayTarget -isHostname $true -success $true
-    Start-Process "msra.exe" -ArgumentList "/offerra $input"
-    Start-Sleep -Seconds 2
-} else {
-            Add-HistoryEntry -target $input -isHostname $true -success $false
-        Start-Sleep -Seconds 2
-    }
-} catch {
-    Write-Host "Ошибка: $_" -ForegroundColor Red
-    Start-Sleep -Seconds 2
-}
-}
-
