@@ -97,7 +97,7 @@ function Remove-FailedHistoryEntries {
 
 function Remove-DuplicateHistoryEntries {
     if (Test-Path $historyFile) {
-        $history = Get-Content $historyFile
+        $history = @(Get-Content $historyFile)
         $filteredHistory = @()
         $prevTarget = ""
         $prevStatus = ""
@@ -105,20 +105,19 @@ function Remove-DuplicateHistoryEntries {
 
         foreach ($line in $history) {
             $fields = $line.Trim() -split '\s*\|\s*'
-            if ($fields.Count -eq 4) {
-                $target = $fields[2]
-                $status = $fields[3]
+            if ($fields.Count -ge 4) {
+                $target = $fields[2].Trim()
+                $status = $fields[3].Trim()
+                
+                # Оставляем только если адрес или статус отличаются от предыдущего
                 if ($target -ne $prevTarget -or $status -ne $prevStatus) {
                     $filteredHistory += $line
-                    } else {
-                        $removedCount++
-
+                } else {
+                    $removedCount++
                 }
-                # Запоминаем только для сравнения следующих подряд
                 $prevTarget = $target
                 $prevStatus = $status
             } else {
-                # Строки не по формату не удаляем и сбрасываем сравнение
                 $filteredHistory += $line
                 $prevTarget = ""
                 $prevStatus = ""
@@ -140,19 +139,27 @@ function Remove-DuplicateHistoryEntries {
 
 function Test-ConsecutiveDuplicates {
     if (Test-Path $historyFile) {
-        $history = Get-Content $historyFile
+        # 🔑 @() гарантирует массив даже при 1 строке
+        $history = @(Get-Content $historyFile)
         $prevTarget = ""
         $prevStatus = ""
+        
         foreach ($line in $history) {
             $fields = $line.Trim() -split '\s*\|\s*'
-            if ($fields.Count -eq 4) {
-                $target = $fields[2]
-                $status = $fields[3]
+            # ✅ Принимаем 4 или 5 полей (с номером подключения их 5)
+            if ($fields.Count -ge 4) {
+                $target = $fields[2].Trim()
+                $status = $fields[3].Trim()
+                
+                # Сравниваем ТОЛЬКО адрес и статус, игнорируя номер подключения
                 if ($target -eq $prevTarget -and $status -eq $prevStatus) {
                     return $true
                 }
                 $prevTarget = $target
                 $prevStatus = $status
+            } else {
+                $prevTarget = ""
+                $prevStatus = ""
             }
         }
     }
