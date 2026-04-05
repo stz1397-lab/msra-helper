@@ -1,9 +1,9 @@
 ﻿# =============================================
-# Умное подключение MSRA v2.17
+# Умное подключение MSRA v2.18
 # Поддержка: trueconf, pacs, ping, история и т.д.
 # =============================================
 
-$scriptVersion = "2.17"# --- Подключение по IP ---
+$scriptVersion = "2.18"# --- Подключение по IP ---
 
 # Настройки истории
 $historyFile = Join-Path $PSScriptRoot "msra_history.log"
@@ -228,49 +228,37 @@ function Show-FullHistory {
 }
 
 function Add-HistoryEntry {
-    param(
-        [string]$target,
-        [bool]$isHostname,
-        [bool]$success,
-        [int]$connectionCount = 0  # ← Новый параметр
-    )
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    param([string]$target, [bool]$isHostname, [bool]$success, [int]$connectionCount = 0)
+    
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $type = if ($isHostname) { "Хост" } else { "IP" }
-    $status = if ($success) { "Успешно" } else { "Нет пинга" }
+    $st = if ($success) { "Успешно" } else { "Нет пинга" }
+    $suf = if ($success -and $connectionCount -gt 0) { " | Подключение #$($connectionCount + 1)" } else { "" }
+    $entry = "$ts | $type | $target | $st$suf"
     
-    # Если это успешное повторное подключение — добавляем номер в запись
-    $suffix = ""
-    if ($success -and $connectionCount -gt 0) {
-        $suffix = " | Подключение #$($connectionCount + 1)"
-    }
+    # 🔑 КРИТИЧНО: @() гарантирует, что $cur ВСЕГДА будет массивом, даже если в файле 1 строка или 0
+    $cur = @(if (Test-Path $historyFile) { Get-Content $historyFile } else { })
     
-    $entry = "$timestamp | $type | $target | $status$suffix"
-    
-    $currentHistory = @()
-    if (Test-Path $historyFile) {
-        $currentHistory = Get-Content $historyFile
-    }
-    $newHistory = ($currentHistory -join "`n") + "`n" + $entry
-    ($newHistory -split "`n" | Where-Object { $_ -ne "" } | Select-Object -Last $maxHistoryEntries) -join "`n" | Out-File $historyFile -Encoding utf8
+    # Добавляем, убираем пустые, оставляем последние N
+    $newHistory = ($cur + $entry) | Where-Object { $_ -ne "" } | Select-Object -Last $maxHistoryEntries
+    $newHistory -join "`n" | Out-File $historyFile -Encoding utf8
 }
 
 function Get-ConnectionCount {
-    param(
-        [string]$target
-    )
+    param([string]$target)
     if (-not (Test-Path $historyFile)) { return 0 }
     
-    $history = Get-Content $historyFile
     $count = 0
-    
-    foreach ($line in $history) {
-        $fields = $line.Trim() -split '\s*\|\s*'
-        if ($fields.Count -eq 4) {
-            $histTarget = $fields[2].Trim()
-            $status = $fields[3].Trim()
-            
-            # Сравниваем: точное совпадение ИЛИ если целевой IP содержится в записи
-            if ($status -eq "Успешно" -and ($histTarget -eq $target -or $histTarget -like "*$target*")) {
+    foreach ($line in Get-Content $historyFile) {
+        # Пропускаем строки без статуса "Успешно"
+        if ($line -notmatch 'Успешно') { continue }
+        
+        # Разбиваем и берём 3-е поле (адрес)
+        $parts = $line.Trim() -split '\s*\|\s*'
+        if ($parts.Count -ge 3) {
+            $histTarget = $parts[2].Trim()
+            # Используем .Contains() вместо -like: быстрее и надёжнее для подстрок
+            if ($histTarget -eq $target -or $histTarget.Contains($target)) {
                 $count++
             }
         }
