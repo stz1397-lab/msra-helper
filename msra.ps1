@@ -1,9 +1,9 @@
 ﻿# =============================================
-# Умное подключение MSRA v2.18
+# Умное подключение MSRA v2.19
 # Поддержка: trueconf, pacs, ping, история и т.д.
 # =============================================
 
-$scriptVersion = "2.18"# --- Подключение по IP ---
+$scriptVersion = "2.19"# --- Подключение по IP ---
 
 # Настройки истории
 $historyFile = Join-Path $PSScriptRoot "msra_history.log"
@@ -166,7 +166,6 @@ function Test-ConsecutiveDuplicates {
     return $false
 }
 
-
 function Show-FullHistory {
     if (Test-Path $historyFile) {
         $history = Get-Content $historyFile
@@ -237,7 +236,7 @@ function Show-FullHistory {
 function Add-HistoryEntry {
     param([string]$target, [bool]$isHostname, [bool]$success, [int]$connectionCount = 0)
     
-    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $ts = Get-Date -Format "dd-MM-yyyy HH:mm:ss"
     $type = if ($isHostname) { "Хост" } else { "IP" }
     $st = if ($success) { "Успешно" } else { "Нет пинга" }
     $suf = if ($success -and $connectionCount -gt 0) { " | Подключение #$($connectionCount + 1)" } else { "" }
@@ -329,7 +328,6 @@ function Update-KnownSubnetsInScript {
         Write-Host "Не удалось найти knownSubnets в скрипте!" -ForegroundColor Red
     }
 }
-
 
 function Test-TCPPortWithFeedback {
     param(
