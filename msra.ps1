@@ -10,7 +10,7 @@ $historyFile = Join-Path $PSScriptRoot "msra_history.log"
 $maxHistoryEntries = 1000
 
 # Список известных подсетей
-$knownSubnets = @(2, 3, 11, 13, 14, 15, 17, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 31, 32, 33, 35, 36, 37, 38, 48, 56, 57, 60, 61, 63, 91, 92, 96, 97, 98, 102, 103, 104, 105, 106, 107, 110, 111, 112, 113, 114, 122, 123, 124, 125, 126, 128, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 214, 215)
+$knownSubnets = @(2, 3, 11, 13, 14, 15, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 31, 32, 33, 35, 36, 37, 38, 48, 56, 57, 60, 61, 63, 91, 92, 96, 97, 98, 102, 103, 104, 105, 106, 107, 110, 111, 112, 113, 114, 122, 123, 124, 125, 126, 128, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 214, 215)
 
 # --- Функции ---
 
@@ -29,6 +29,7 @@ function Show-Help {
     Write-Host "• scanpass  - Пароль от учётки Scan" -ForegroundColor Gray
     Write-Host "• distr     - Открыть папку дистрибутивов" -ForegroundColor Gray
     Write-Host "• restart   - Перезагрузка компьютера" -ForegroundColor Gray
+    Write-Host "• cleanrest - Очистить историю и перезагрузить компьютер" -ForegroundColor Gray 
     Write-Host "• exit      - Выход из программы" -ForegroundColor Gray
     Write-Host ""
     Read-Host "Нажмите Enter, чтобы вернуться в меню"
@@ -547,7 +548,7 @@ while ($true) {
         Write-Host "• $exampleDotted → $exampleIPDotted"
         Write-Host "• $exampleJoined → $exampleIPJoined"
         Write-Host "• Имя хоста (например $hostExample)"
-        Write-Host "• ping hostname / $examplePing (-t)"
+        Write-Host "• ping $hostExample / $examplePing (-t для бесконечного пинга)"
         Write-Host "• help → Справка по дополнительным командам"
         Write-Host "• his → Показать всю историю подключений"
         Write-Host "• clear → Очистить историю подключений"
@@ -596,6 +597,19 @@ while ($true) {
         if ($userInput -ieq "restart") {
             if ((Get-CimInstance Win32_ComputerSystem).NumberOfUsers -gt 1) {
                 Write-Warning "Есть активные пользователи. Продолжить?"
+                if ((Read-Host "(y/n)") -notmatch '^[yYдД]') { Write-Host "Отмена." -ForegroundColor Yellow; Start-Sleep 2; continue }
+            }
+            try { Restart-Computer -Force; Write-Host "Перезагрузка..." -ForegroundColor Green } catch { Write-Host "Ошибка: $_" -ForegroundColor Red }
+            Start-Sleep 2; continue
+        }
+
+        if ($userInput -ieq "cleanrest") {
+            Write-Host "Очистка истории подключений..." -ForegroundColor Yellow
+            Clear-HistoryFile
+            Write-Host "Перезагрузка компьютера..." -ForegroundColor Cyan
+            Start-Sleep -Seconds 2
+            if ((Get-CimInstance Win32_ComputerSystem).NumberOfUsers -gt 1) {
+                Write-Warning "Есть активные пользователи. Продолжить перезагрузку?"
                 if ((Read-Host "(y/n)") -notmatch '^[yYдД]') { Write-Host "Отмена." -ForegroundColor Yellow; Start-Sleep 2; continue }
             }
             try { Restart-Computer -Force; Write-Host "Перезагрузка..." -ForegroundColor Green } catch { Write-Host "Ошибка: $_" -ForegroundColor Red }
