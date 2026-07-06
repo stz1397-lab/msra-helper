@@ -1,13 +1,16 @@
 ﻿# =============================================
-# Умное подключение MSRA v2.19
+# Умное подключение MSRA v2.20
 # Поддержка: trueconf, pacs, ping, история и т.д.
 # =============================================
 
-$scriptVersion = "2.19"# --- Подключение по IP ---
+$scriptVersion = "2.20"# --- Подключение по IP ---
 
 # Настройки истории
 $historyFile = Join-Path $PSScriptRoot "msra_history.log"
 $maxHistoryEntries = 1000
+# Настройки автоочистки истории
+$autoCleanupTime = "10:00"  # Время очистки (24-часовой формат)
+$cleanupMarkerFile = Join-Path $PSScriptRoot "msra_cleanup.marker"
 
 # Список известных подсетей
 $knownSubnets = @(2, 3, 11, 13, 14, 15, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 31, 32, 33, 35, 36, 37, 38, 48, 56, 57, 60, 61, 63, 91, 92, 96, 97, 98, 102, 103, 104, 105, 106, 107, 110, 111, 112, 113, 114, 122, 123, 124, 125, 126, 128, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 214, 215)
@@ -271,6 +274,40 @@ function Get-ConnectionCount {
         }
     }
     return $count
+}
+
+function Test-ShouldAutoCleanup {
+    param([string]$cleanupTime)
+    
+    $now = Get-Date
+    $today = $now.Date
+    $cleanupThreshold = [DateTime]::ParseExact($cleanupTime, "HH:mm", $null).Date.Add(
+        [TimeSpan]::ParseExact($cleanupTime, "hh\:mm", $null)
+    )
+    
+    # Если ещё не 10:00 — не чистим
+    if ($now -lt $cleanupThreshold) { return $false }
+    
+    # Проверяем маркер: чистили ли уже сегодня?
+    if (Test-Path $cleanupMarkerFile) {
+        $lastCleanup = Get-Content $cleanupMarkerFile -ErrorAction SilentlyContinue
+        if ($lastCleanup -and [DateTime]$lastCleanup -ge $today) {
+            return $false  # Уже чистили сегодня
+        }
+    }
+    return $true  # Пора чистить!
+}
+
+function PerformAutoCleanup {
+    Write-Host "`n🔄 Автоочистка истории подключений..." -ForegroundColor Cyan
+    if (Test-Path $historyFile) {
+        Clear-Content $historyFile -ErrorAction SilentlyContinue
+        Write-Host "История очищена." -ForegroundColor Green
+    }
+    # Записываем маркер: сегодня чистили
+    $null = New-Item -Path $cleanupMarkerFile -ItemType File -Force -ErrorAction SilentlyContinue
+    (Get-Date).Date.ToString("yyyy-MM-dd") | Out-File $cleanupMarkerFile -Encoding utf8 -Force
+    Start-Sleep -Seconds 1
 }
 
 function Get-HostnameAndIP {
@@ -537,6 +574,11 @@ $examplePingIP = "192.168.$randomSubnet.$randomTailPing"
 # --- Основной цикл ---
 while ($true) {
     try {
+            # === Автоочистка истории в 10:00 ===
+        if (Test-ShouldAutoCleanup -cleanupTime $autoCleanupTime) {
+            PerformAutoCleanup
+        }
+        # ===================================
         Clear-Host
         Write-Host "╔══════════════════════════════════════╗" -ForegroundColor Cyan
         Write-Host "║     Умное подключение MSRA v$scriptVersion     ║" -ForegroundColor Cyan
