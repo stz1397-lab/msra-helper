@@ -32,10 +32,11 @@ function Show-Help {
     Write-Host "• scanpass  - Пароль от учётки Scan" -ForegroundColor Gray
     Write-Host "• distr     - Открыть папку дистрибутивов" -ForegroundColor Gray
     Write-Host "• restart   - Перезагрузка компьютера" -ForegroundColor Gray
-    Write-Host "• cleanrest - Очистить историю и перезагрузить компьютер" -ForegroundColor Gray 
     Write-Host "• exit      - Выход из программы" -ForegroundColor Gray
     Write-Host ""
-    Read-Host "Нажмите Enter, чтобы вернуться в меню"
+    Write-Host "История подключений сбрасывается каждый день в 07:30" -ForegroundColor Magenta
+    Read-Host  "`nНажмите Enter, чтобы вернуться в меню"
+    
 }
 
 function Show-History {
@@ -645,18 +646,6 @@ while ($true) {
             Start-Sleep 2; continue
         }
 
-        if ($userInput -ieq "cleanrest") {
-            Write-Host "Очистка истории подключений..." -ForegroundColor Yellow
-            Clear-HistoryFile
-            Write-Host "Перезагрузка компьютера..." -ForegroundColor Cyan
-            Start-Sleep -Seconds 2
-            if ((Get-CimInstance Win32_ComputerSystem).NumberOfUsers -gt 1) {
-                Write-Warning "Есть активные пользователи. Продолжить перезагрузку?"
-                if ((Read-Host "(y/n)") -notmatch '^[yYдД]') { Write-Host "Отмена." -ForegroundColor Yellow; Start-Sleep 2; continue }
-            }
-            try { Restart-Computer -Force; Write-Host "Перезагрузка..." -ForegroundColor Green } catch { Write-Host "Ошибка: $_" -ForegroundColor Red }
-            Start-Sleep 2; continue
-        }
         if ($userInput -ieq "exit") { exit }
         if ($userInput -ieq "scanpass") { "53807553QaZ" | Set-Clipboard; Write-Host "Пароль Scan скопирован"; Read-Host "Enter"; continue }
         if ($userInput -ieq "sigur")   { "rt54de1z"      | Set-Clipboard; Write-Host "Пароль Sigur скопирован"; Read-Host "Enter"; continue }
