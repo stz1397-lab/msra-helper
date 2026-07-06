@@ -9,7 +9,7 @@ $scriptVersion = "2.20"# --- Подключение по IP ---
 $historyFile = Join-Path $PSScriptRoot "msra_history.log"
 $maxHistoryEntries = 1000
 # Настройки автоочистки истории
-$autoCleanupTime = "10:00"  # Время очистки (24-часовой формат)
+$autoCleanupTime = "07:30"  # Время очистки (24-часовой формат)
 $cleanupMarkerFile = Join-Path $PSScriptRoot "msra_cleanup.marker"
 
 # Список известных подсетей
