@@ -1,9 +1,9 @@
 ﻿# =============================================
-# Умное подключение MSRA v2.20
+# Умное подключение MSRA v2.22
 # Поддержка: trueconf, pacs, ping, история и т.д.
 # =============================================
 
-$scriptVersion = "2.20"# --- Подключение по IP ---
+$scriptVersion = "2.22"# --- Подключение по IP ---
 
 # Настройки истории
 $historyFile = Join-Path $PSScriptRoot "msra_history.log"
@@ -27,6 +27,7 @@ function Show-Help {
     Write-Host ""
     Write-Host "• update    - Обновить скрипт до последней версии" -ForegroundColor Gray
     Write-Host "• trueconf  - Открыть админку TrueConf" -ForegroundColor Gray
+    Write-Host "• mark      - Отметить последнее подключение как важное" -ForegroundColor Gray
     Write-Host "• pacs      - Открыть админку PACS" -ForegroundColor Gray
     Write-Host "• glpi      - Открыть GLPI" -ForegroundColor Gray
     Write-Host "• scanpass  - Пароль от учётки Scan" -ForegroundColor Gray
@@ -41,25 +42,98 @@ function Show-Help {
 
 function Show-History {
     if (Test-Path $historyFile) {
-        $history = Get-Content $historyFile
+        $history = @(Get-Content $historyFile)
         if ($history.Count -gt 0) {
             Write-Host "`nПоследние подключения:" -ForegroundColor Yellow
             Write-Host ""
             $history | Select-Object -Last 10 | ForEach-Object {
                 $line = $_
-                $baseColor = if ($line -match "Успешно") { "Green" } else { "Red" }
+                $isImportant = $line -match "⭐ ВАЖНО"
                 
-                if ($line -match '(.+)(\s+\|\s+Подключение\s+#\d+)$') {
-                    $mainPart = $matches[1]
-                    $suffix  = $matches[2]
-                    Write-Host " $mainPart" -ForegroundColor $baseColor -NoNewline
-                    Write-Host $suffix -ForegroundColor Yellow
+                if ($isImportant) {
+                    Write-Host " $line" -ForegroundColor Yellow
                 } else {
-                    Write-Host " $line" -ForegroundColor $baseColor
+                    $baseColor = if ($line -match "Успешно") { "Green" } else { "Red" }
+                    if ($line -match '(.+)(\s+\|\s+Подключение\s+#\d+)$') {
+                        Write-Host " $($matches[1])" -ForegroundColor $baseColor -NoNewline
+                        Write-Host $($matches[2]) -ForegroundColor DarkYellow
+                    } else {
+                        Write-Host " $line" -ForegroundColor $baseColor
+                    }
                 }
             }
             Write-Host ""
         }
+    }
+}
+
+function Show-FullHistory {
+    if (Test-Path $historyFile) {
+        $history = @(Get-Content $historyFile)
+        if ($history.Count -gt 0) {
+            $history | ForEach-Object {
+                $line = $_
+                $isImportant = $line -match "⭐ ВАЖНО"
+                
+                if ($isImportant) {
+                    Write-Host " $line" -ForegroundColor Yellow
+                } else {
+                    $baseColor = if ($line -match "Успешно") { "Green" } else { "Red" }
+                    if ($line -match '(.+)(\s+\|\s+Подключение\s+#\d+)$') {
+                        Write-Host " $($matches[1])" -ForegroundColor $baseColor -NoNewline
+                        Write-Host $($matches[2]) -ForegroundColor DarkYellow
+                    } else {
+                        Write-Host " $line" -ForegroundColor $baseColor
+                    }
+                }
+            }
+
+            $total = $history.Count
+            $success = ($history -match "Успешно").Count
+            $failed = $total - $success
+            Write-Host "`nВсего $total записей:" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "Успешных: $success" -ForegroundColor Green -NoNewline
+            Write-Host " | Неудачных: $failed" -ForegroundColor Red
+
+            $hasFailed = $failed -gt 0
+            $hasDuplicates = Test-ConsecutiveDuplicates
+
+            Write-Host "`nДополнительные действия:" -ForegroundColor Yellow
+            if ($hasFailed) { Write-Host "Del     - Удалить все неудачные подключения" }
+            if ($hasDuplicates) { Write-Host "Deldbl  - Удалить подряд идущие дубликаты" }
+            if ($hasFailed -and $hasDuplicates) { Write-Host "Delall  - Удалить и неудачные, и дубликаты" }
+            Write-Host "Enter   - Вернуться в меню"
+
+            $choice = Read-Host "`nВыбор"
+            switch ($choice.Trim().ToLower()) {
+                { $_ -in "del", "вуд" } { Remove-FailedHistoryEntries }
+                "deldbl" { Remove-DuplicateHistoryEntries }
+                { $_ -in "delall", "вудфдд" } {
+                    if (Test-Path $historyFile) {
+                        $historyBefore = Get-Content $historyFile
+                        $failedCount = ($historyBefore -match "Нет пинга").Count
+                        if ($failedCount -gt 0) { Remove-FailedHistoryEntries }
+                        if (Test-ConsecutiveDuplicates) { Remove-DuplicateHistoryEntries }
+                        $historyAfter = Get-Content $historyFile
+                        $removedTotal = $historyBefore.Count - $historyAfter.Count
+                        if ($removedTotal -gt 0) { Write-Host "Всего удалено записей: $removedTotal" -ForegroundColor Cyan }
+                        else { Write-Host "Нечего удалять." -ForegroundColor Yellow }
+                        Start-Sleep -Seconds 2
+                    } else {
+                        Write-Host "Файл истории не найден." -ForegroundColor Red
+                        Start-Sleep -Seconds 2
+                    }
+                }
+                default { }
+            }
+        } else {
+            Write-Host "История пуста." -ForegroundColor Yellow
+            Read-Host "`nНажмите Enter, чтобы вернуться в меню"
+        }
+    } else {
+        Write-Host "Файл истории не найден." -ForegroundColor Red
+        Read-Host "`nНажмите Enter, чтобы вернуться в меню"
     }
 }
 
@@ -275,6 +349,57 @@ function Get-ConnectionCount {
         }
     }
     return $count
+}
+
+function Mark-ImportantConnection {
+    if (-not (Test-Path $historyFile)) { 
+        Write-Host "История пуста." -ForegroundColor Yellow
+        Start-Sleep 2; return 
+    }
+    
+    $history = @(Get-Content $historyFile)
+    $recent = $history | Select-Object -Last 5
+    if ($recent.Count -eq 0) { 
+        Write-Host "Нет записей для отметки." -ForegroundColor Yellow
+        Start-Sleep 2; return 
+    }
+
+    Write-Host "`nПоследние подключения:" -ForegroundColor Cyan
+    for ($i = 0; $i -lt $recent.Count; $i++) {
+        $col = if ($recent[$i] -match "Успешно") { "Green" } else { "Red" }
+        Write-Host " $($i+1). $($recent[$i])" -ForegroundColor $col
+    }
+    Write-Host " 0. Отмена" -ForegroundColor DarkGray
+    
+    $choice = Read-Host "`nВыберите номер (0-$($recent.Count))"
+    if ($choice -match '^\d+$' -and [int]$choice -ge 1 -and [int]$choice -le $recent.Count) {
+        $selectedLine = $recent[[int]$choice - 1]
+        
+        if ($selectedLine -match "⭐ ВАЖНО") {
+            Write-Host "Запись уже помечена как важная." -ForegroundColor Yellow
+            Start-Sleep 2; return
+        }
+
+        # Безопасная замена строки в файле
+        $updated = @()
+        $found = $false
+        foreach ($line in $history) {
+            if (-not $found -and $line.Trim() -eq $selectedLine.Trim()) {
+                $updated += "$line | ⭐ ВАЖНО"
+                $found = $true
+            } else {
+                $updated += $line
+            }
+        }
+
+        if ($found) {
+            $updated | Set-Content $historyFile -Encoding utf8
+            Write-Host "Запись успешно отмечена как важная!" -ForegroundColor Green
+        } else {
+            Write-Host "Не удалось найти запись в файле." -ForegroundColor Red
+        }
+        Start-Sleep 2
+    }
 }
 
 function Test-ShouldAutoCleanup {
@@ -650,6 +775,10 @@ while ($true) {
         if ($userInput -ieq "scanpass") { "53807553QaZ" | Set-Clipboard; Write-Host "Пароль Scan скопирован"; Read-Host "Enter"; continue }
         if ($userInput -ieq "sigur")   { "rt54de1z"      | Set-Clipboard; Write-Host "Пароль Sigur скопирован"; Read-Host "Enter"; continue }
         if ($userInput -ieq "distr")   { Invoke-Item "\\fileserver\distr$"; continue }
+        if ($userInput -ieq "mark") {
+            Mark-ImportantConnection
+            continue
+        }
         if ($userInput -ieq "pacs") {
             Start-Process "http://pacs-2.lan.smclinic.ru/pacs/login.php"
             Write-Host "PACS открыт." -ForegroundColor Green
