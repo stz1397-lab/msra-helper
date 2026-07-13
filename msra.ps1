@@ -16,7 +16,6 @@ $cleanupMarkerFile = Join-Path $PSScriptRoot "msra_cleanup.marker"
 $knownSubnets = @(2, 3, 11, 13, 14, 15, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 31, 32, 33, 35, 36, 37, 38, 48, 56, 57, 60, 61, 63, 91, 92, 96, 97, 98, 102, 103, 104, 105, 106, 107, 110, 111, 112, 113, 114, 122, 123, 124, 125, 126, 128, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 214, 215)
 
 # --- Функции ---
-
 function Show-Help {
     Clear-Host
     Write-Host "╔══════════════════════════════════════╗" -ForegroundColor Cyan
@@ -27,17 +26,27 @@ function Show-Help {
     Write-Host ""
     Write-Host "• update    - Обновить скрипт до последней версии" -ForegroundColor Gray
     Write-Host "• trueconf  - Открыть админку TrueConf" -ForegroundColor Gray
-    Write-Host "• mark      - Отметить последнее подключение как важное" -ForegroundColor Gray
     Write-Host "• pacs      - Открыть админку PACS" -ForegroundColor Gray
     Write-Host "• glpi      - Открыть GLPI" -ForegroundColor Gray
     Write-Host "• scanpass  - Пароль от учётки Scan" -ForegroundColor Gray
     Write-Host "• distr     - Открыть папку дистрибутивов" -ForegroundColor Gray
     Write-Host "• restart   - Перезагрузка компьютера" -ForegroundColor Gray
+    Write-Host "• mark      - Отметить последнее подключение как важное" -ForegroundColor Gray
+
+    # 🔍 Показываем unmark только если есть важные записи
+    $hasImportant = $false
+    if (Test-Path $historyFile) {
+        $content = Get-Content $historyFile -ErrorAction SilentlyContinue
+        if ($content) { $hasImportant = ($content -match '\[ВАЖНО\]').Count -gt 0 }
+    }
+    if ($hasImportant) {
+        Write-Host "• unmark    - Снять отметку важности с подключения" -ForegroundColor Gray
+    }
+
     Write-Host "• exit      - Выход из программы" -ForegroundColor Gray
     Write-Host ""
-    Write-Host "История подключений сбрасывается каждый день в 07:30" -ForegroundColor Magenta
-    Read-Host  "`nНажмите Enter, чтобы вернуться в меню"
-    
+    Write-Host "Автоочистка: история подключений сбрасывается каждый день в 07:30" -ForegroundColor Magenta
+    Read-Host "`nНажмите Enter, чтобы вернуться в меню"
 }
 
 function Show-History {
@@ -48,7 +57,8 @@ function Show-History {
             Write-Host ""
             $history | Select-Object -Last 10 | ForEach-Object {
                 $line = $_
-                $isImportant = $line -match "⭐ ВАЖНО"
+                # ✅ Ищем [ВАЖНО] — телефон после него не влияет на подсветку
+                $isImportant = $line -match '\[ВАЖНО\]'
                 
                 if ($isImportant) {
                     Write-Host " $line" -ForegroundColor Yellow
@@ -64,76 +74,6 @@ function Show-History {
             }
             Write-Host ""
         }
-    }
-}
-
-function Show-FullHistory {
-    if (Test-Path $historyFile) {
-        $history = @(Get-Content $historyFile)
-        if ($history.Count -gt 0) {
-            $history | ForEach-Object {
-                $line = $_
-                $isImportant = $line -match "⭐ ВАЖНО"
-                
-                if ($isImportant) {
-                    Write-Host " $line" -ForegroundColor Yellow
-                } else {
-                    $baseColor = if ($line -match "Успешно") { "Green" } else { "Red" }
-                    if ($line -match '(.+)(\s+\|\s+Подключение\s+#\d+)$') {
-                        Write-Host " $($matches[1])" -ForegroundColor $baseColor -NoNewline
-                        Write-Host $($matches[2]) -ForegroundColor DarkYellow
-                    } else {
-                        Write-Host " $line" -ForegroundColor $baseColor
-                    }
-                }
-            }
-
-            $total = $history.Count
-            $success = ($history -match "Успешно").Count
-            $failed = $total - $success
-            Write-Host "`nВсего $total записей:" -ForegroundColor Yellow
-            Write-Host ""
-            Write-Host "Успешных: $success" -ForegroundColor Green -NoNewline
-            Write-Host " | Неудачных: $failed" -ForegroundColor Red
-
-            $hasFailed = $failed -gt 0
-            $hasDuplicates = Test-ConsecutiveDuplicates
-
-            Write-Host "`nДополнительные действия:" -ForegroundColor Yellow
-            if ($hasFailed) { Write-Host "Del     - Удалить все неудачные подключения" }
-            if ($hasDuplicates) { Write-Host "Deldbl  - Удалить подряд идущие дубликаты" }
-            if ($hasFailed -and $hasDuplicates) { Write-Host "Delall  - Удалить и неудачные, и дубликаты" }
-            Write-Host "Enter   - Вернуться в меню"
-
-            $choice = Read-Host "`nВыбор"
-            switch ($choice.Trim().ToLower()) {
-                { $_ -in "del", "вуд" } { Remove-FailedHistoryEntries }
-                "deldbl" { Remove-DuplicateHistoryEntries }
-                { $_ -in "delall", "вудфдд" } {
-                    if (Test-Path $historyFile) {
-                        $historyBefore = Get-Content $historyFile
-                        $failedCount = ($historyBefore -match "Нет пинга").Count
-                        if ($failedCount -gt 0) { Remove-FailedHistoryEntries }
-                        if (Test-ConsecutiveDuplicates) { Remove-DuplicateHistoryEntries }
-                        $historyAfter = Get-Content $historyFile
-                        $removedTotal = $historyBefore.Count - $historyAfter.Count
-                        if ($removedTotal -gt 0) { Write-Host "Всего удалено записей: $removedTotal" -ForegroundColor Cyan }
-                        else { Write-Host "Нечего удалять." -ForegroundColor Yellow }
-                        Start-Sleep -Seconds 2
-                    } else {
-                        Write-Host "Файл истории не найден." -ForegroundColor Red
-                        Start-Sleep -Seconds 2
-                    }
-                }
-                default { }
-            }
-        } else {
-            Write-Host "История пуста." -ForegroundColor Yellow
-            Read-Host "`nНажмите Enter, чтобы вернуться в меню"
-        }
-    } else {
-        Write-Host "Файл истории не найден." -ForegroundColor Red
-        Read-Host "`nНажмите Enter, чтобы вернуться в меню"
     }
 }
 
@@ -352,17 +292,11 @@ function Get-ConnectionCount {
 }
 
 function Mark-ImportantConnection {
-    if (-not (Test-Path $historyFile)) { 
-        Write-Host "История пуста." -ForegroundColor Yellow
-        Start-Sleep 2; return 
-    }
+    if (-not (Test-Path $historyFile)) { Write-Host "История пуста." -ForegroundColor Yellow; Start-Sleep 2; return }
     
     $history = @(Get-Content $historyFile)
     $recent = $history | Select-Object -Last 5
-    if ($recent.Count -eq 0) { 
-        Write-Host "Нет записей для отметки." -ForegroundColor Yellow
-        Start-Sleep 2; return 
-    }
+    if ($recent.Count -eq 0) { Write-Host "Нет записей для отметки." -ForegroundColor Yellow; Start-Sleep 2; return }
 
     Write-Host "`nПоследние подключения:" -ForegroundColor Cyan
     for ($i = 0; $i -lt $recent.Count; $i++) {
@@ -375,31 +309,98 @@ function Mark-ImportantConnection {
     if ($choice -match '^\d+$' -and [int]$choice -ge 1 -and [int]$choice -le $recent.Count) {
         $selectedLine = $recent[[int]$choice - 1]
         
-        if ($selectedLine -match "⭐ ВАЖНО") {
+        # Проверка: уже отмечено?
+        if ($selectedLine -match '\[ВАЖНО\]') { 
             Write-Host "Запись уже помечена как важная." -ForegroundColor Yellow
-            Start-Sleep 2; return
+            Start-Sleep 2; return 
         }
 
-        # Безопасная замена строки в файле
+        # 🔹 Спрашиваем про номер телефона
+        Write-Host ""
+        $addPhone = Read-Host "Добавить номер телефона к этому подключению? (y/n)"
+        $phoneSuffix = ""
+        
+        if ($addPhone -match '^[yYдД]') {
+            $phone = Read-Host "Введите номер телефона"
+            if ($phone -ne "") {
+                # ✅ Новый формат: ; ТЕЛ: <номер>
+                $phoneSuffix = "; ТЕЛ: $phone"
+            }
+        }
+
+        # Формируем строку: [ВАЖНО] + опциональный телефон
+        $marker = "[ВАЖНО]$phoneSuffix"
+
+        # Обновляем файл: находим точное совпадение строки и добавляем маркер
         $updated = @()
         $found = $false
         foreach ($line in $history) {
             if (-not $found -and $line.Trim() -eq $selectedLine.Trim()) {
-                $updated += "$line | ⭐ ВАЖНО"
+                $updated += "$line | $marker"
                 $found = $true
-            } else {
-                $updated += $line
+            } else { 
+                $updated += $line 
             }
         }
 
         if ($found) {
             $updated | Set-Content $historyFile -Encoding utf8
-            Write-Host "Запись успешно отмечена как важная!" -ForegroundColor Green
-        } else {
-            Write-Host "Не удалось найти запись в файле." -ForegroundColor Red
+            Write-Host "Запись успешно отмечена!" -ForegroundColor Green
+            if ($phoneSuffix -ne "") {
+                Write-Host "Номер телефона: $phone" -ForegroundColor DarkYellow
+            }
+        } else { 
+            Write-Host "Не удалось найти запись в файле." -ForegroundColor Red 
         }
         Start-Sleep 2
     }
+}
+
+function Unmark-ImportantConnection {
+    if (-not (Test-Path $historyFile)) { Write-Host "История пуста." -ForegroundColor Yellow; Start-Sleep 2; return }
+
+    $history = @(Get-Content $historyFile)
+    $markedLines = @()
+    $markedIndices = @()
+
+    # Ищем строки с маркером [ВАЖНО] (с телефоном или без)
+    for ($i = 0; $i -lt $history.Count; $i++) {
+        if ($history[$i] -match '\[ВАЖНО\]') {
+            $markedLines += $history[$i]
+            $markedIndices += $i
+        }
+    }
+
+    if ($markedLines.Count -eq 0) {
+        Write-Host "Нет важных подключений для снятия отметки." -ForegroundColor Yellow
+        Start-Sleep 2; return
+    }
+
+    Write-Host "`nОтмеченные подключения:" -ForegroundColor Cyan
+    for ($i = 0; $i -lt $markedLines.Count; $i++) {
+        Write-Host " $($i+1). $($markedLines[$i])" -ForegroundColor Yellow
+    }
+    Write-Host " 0. Отмена" -ForegroundColor DarkGray
+
+    $choice = Read-Host "`nВыберите номер для снятия отметки (0-$($markedLines.Count))"
+    if ($choice -match '^\d+$' -and [int]$choice -ge 1 -and [int]$choice -le $markedLines.Count) {
+        $indexToUnmark = $markedIndices[[int]$choice - 1]
+        $originalLine = $history[$indexToUnmark]
+        
+        # ✅ Удаляем [ВАЖНО] и всё, что после него до конца строки (включая ; ТЕЛ: ...)
+        $unmarkedLine = $originalLine -replace '\s*\|\s*\[ВАЖНО\].*$', ''
+
+        if ($unmarkedLine -ne $originalLine) {
+            $history[$indexToUnmark] = $unmarkedLine
+            $history | Set-Content $historyFile -Encoding utf8
+            Write-Host "Отметка успешно снята!" -ForegroundColor Green
+        } else { 
+            Write-Host "Не удалось снять отметку." -ForegroundColor Red 
+        }
+    } else { 
+        Write-Host "Отмена." -ForegroundColor Yellow 
+    }
+    Start-Sleep 2
 }
 
 function Test-ShouldAutoCleanup {
@@ -425,12 +426,15 @@ function Test-ShouldAutoCleanup {
 }
 
 function PerformAutoCleanup {
-    Write-Host "`n🔄 Автоочистка истории подключений..." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host ">>> Автоочистка истории подключений..." -ForegroundColor Cyan
+    Start-Sleep -Milliseconds 300
+    
     if (Test-Path $historyFile) {
         Clear-Content $historyFile -ErrorAction SilentlyContinue
         Write-Host "История очищена." -ForegroundColor Green
     }
-    # Записываем маркер: сегодня чистили
+    
     $null = New-Item -Path $cleanupMarkerFile -ItemType File -Force -ErrorAction SilentlyContinue
     (Get-Date).Date.ToString("yyyy-MM-dd") | Out-File $cleanupMarkerFile -Encoding utf8 -Force
     Start-Sleep -Seconds 1
@@ -779,6 +783,7 @@ while ($true) {
             Mark-ImportantConnection
             continue
         }
+        if ($userInput -ieq "unmark") { Unmark-ImportantConnection; continue }
         if ($userInput -ieq "pacs") {
             Start-Process "http://pacs-2.lan.smclinic.ru/pacs/login.php"
             Write-Host "PACS открыт." -ForegroundColor Green
