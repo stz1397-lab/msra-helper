@@ -379,16 +379,34 @@ function Unmark-ImportantConnection {
 }
 
 function Test-ShouldAutoCleanup {
-    param([string]$cleanupTime)
-    
+    param(
+        [string]$cleanupTime
+    )
+
+    if ([string]::IsNullOrWhiteSpace($cleanupTime)) {
+        return $false
+    }
+
+    $parsedTime = [datetime]::MinValue
+
+    if (-not [datetime]::TryParseExact(
+        $cleanupTime,
+        'HH:mm',
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [System.Globalization.DateTimeStyles]::None,
+        [ref]$parsedTime
+    )) {
+        Write-Warning "Некорректное время автоочистки: '$cleanupTime'. Ожидается формат HH:mm, например 23:00."
+        return $false
+    }
+
     $now = Get-Date
     $today = $now.Date
-    $cleanupThreshold = [DateTime]::ParseExact($cleanupTime, "HH:mm", $null).Date.Add(
-        [TimeSpan]::ParseExact($cleanupTime, "hh\:mm", $null)
-    )
-    
-    # Если ещё не 10:00 — не чистим
-    if ($now -lt $cleanupThreshold) { return $false }
+    $cleanupThreshold = $today.Add($parsedTime.TimeOfDay)
+
+    if ($now -lt $cleanupThreshold) {
+        return $false
+    }
     
     # Проверяем маркер: чистили ли уже сегодня?
     if (Test-Path $cleanupMarkerFile) {
