@@ -49,13 +49,52 @@ function Show-Help {
     Read-Host "`nНажмите Enter, чтобы вернуться в меню"
 }
 
+function Get-NormalizedTarget {
+    param([string]$target)
+    # 🔑 Извлекаем IP-адрес из строки вида "host (192.168.x.x)" или "192.168.x.x (HOST)",
+    # чтобы объединить счётчик для одного физического адреса независимо от типа записи (Хост/IP)
+    if ($target -match '(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})') {
+        return $matches[1]
+    }
+    return $target.ToLower()
+}
+
+function Get-DisplayHistory {
+    param([array]$lines)
+    # 🔑 Вычисляет номер подключения "на лету" для каждой строки,
+    # не храня его в файле — актуален всегда, даже после удаления записей.
+    # Номер показываем только начиная со ВТОРОГО подключения (#1 не пишем).
+    # Счётчик ведётся по IP-адресу, чтобы записи "Хост" и "IP" для одного устройства считались вместе.
+    $targetCounts = @{}
+    $result = @()
+    foreach ($line in $lines) {
+        $fields = $line.Trim() -split '\s*\|\s*'
+        if ($fields.Count -ge 4 -and $fields[3].Trim() -eq "Успешно") {
+            $target = Get-NormalizedTarget -target $fields[2].Trim()
+            if (-not $targetCounts.ContainsKey($target)) { $targetCounts[$target] = 0 }
+            $targetCounts[$target]++
+            # Убираем старый суффикс "Подключение #N", если он есть (для совместимости со старыми записями)
+            $baseLine = $line -replace '\s*\|\s*Подключение\s+#\d+\s*$', ''
+            if ($targetCounts[$target] -gt 1) {
+                $result += "$baseLine | Подключение #$($targetCounts[$target])"
+            } else {
+                $result += $baseLine
+            }
+        } else {
+            $result += $line
+        }
+    }
+    return $result
+}
+
 function Show-History {
     if (Test-Path $historyFile) {
         $history = @(Get-Content $historyFile)
         if ($history.Count -gt 0) {
             Write-Host "`nПоследние подключения:" -ForegroundColor Yellow
             Write-Host ""
-            $history | Select-Object -Last 10 | ForEach-Object {
+            $displayHistory = Get-DisplayHistory -lines $history
+            $displayHistory | Select-Object -Last 10 | ForEach-Object {
                 $line = $_
                 # ✅ Ищем [ВАЖНО] — телефон после него не влияет на подсветку
                 $isImportant = $line -match '\[!\]'
@@ -189,7 +228,8 @@ function Show-FullHistory {
     if (Test-Path $historyFile) {
         $history = @(Get-Content $historyFile)
         if ($history.Count -gt 0) {
-            $history | ForEach-Object {
+            $displayHistory = Get-DisplayHistory -lines $history
+            $displayHistory | ForEach-Object {
                 $line = $_
                 # ✅ ИСПРАВЛЕНО: ищем маркер важности [!] вместо ТЕЛ:
                 $isImportant = $line -match '\[!\]'
@@ -262,8 +302,9 @@ function Add-HistoryEntry {
     $ts = Get-Date -Format "dd-MM-yyyy HH:mm:ss"
     $type = if ($isHostname) { "Хост" } else { "IP" }
     $st = if ($success) { "Успешно" } else { "Нет пинга" }
-    $suf = if ($success -and $connectionCount -gt 0) { " | Подключение #$($connectionCount + 1)" } else { "" }
-    $entry = "$ts | $type | $target | $st$suf"
+    # 🔑 Номер подключения больше НЕ хранится в файле — вычисляется динамически
+    # функцией Get-DisplayHistory при отображении (Show-History/Show-FullHistory)
+    $entry = "$ts | $type | $target | $st"
     
     # 🔑 КРИТИЧНО: @() гарантирует, что $cur ВСЕГДА будет массивом, даже если в файле 1 строка или 0
     $cur = @(if (Test-Path $historyFile) { Get-Content $historyFile } else { })
