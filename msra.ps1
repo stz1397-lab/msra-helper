@@ -1,9 +1,9 @@
 ﻿# =============================================
-# Умное подключение MSRA v2.25
+# Умное подключение MSRA v2.26
 # Поддержка: trueconf, pacs, ping, история и т.д.
 # =============================================
 
-$scriptVersion = "2.25"# --- Подключение по IP ---
+$scriptVersion = "2.26"  # v2.26: полные IP (172.20.x.x и др.), отмена по 0 в mark, правки меню
 
 # Настройки истории
 $historyFile = Join-Path $PSScriptRoot "msra_history.log"
@@ -13,7 +13,7 @@ $autoCleanupTime = "07:30"  # Время очистки (24-часовой фо�
 $cleanupMarkerFile = Join-Path $PSScriptRoot "msra_cleanup.marker"
 
 # Список известных подсетей
-$knownSubnets = @(2, 3, 11, 13, 14, 15, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 31, 32, 33, 35, 36, 37, 38, 48, 56, 57, 60, 61, 63, 91, 92, 96, 97, 98, 102, 103, 104, 105, 106, 107, 110, 111, 112, 113, 114, 122, 123, 124, 125, 126, 128, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 214, 215)
+$knownSubnets = @(2, 3, 11, 13, 14, 15, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 31, 32, 33, 35, 36, 37, 38, 48, 56, 57, 60, 61, 63, 91, 92, 96, 97, 98, 102, 103, 104, 105, 106, 107, 110, 111, 112, 113, 114, 122, 123, 124, 125, 126, 128, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 145, 214, 215)
 
 # --- Функции ---
 function Show-Help {
@@ -31,7 +31,7 @@ function Show-Help {
     Write-Host "• scanpass  - Пароль от учётки Scan" -ForegroundColor Gray
     Write-Host "• distr     - Открыть папку дистрибутивов" -ForegroundColor Gray
     Write-Host "• restart   - Перезагрузка компьютера" -ForegroundColor Gray
-    Write-Host "• mark      - Отметить последнее подключение как важное" -ForegroundColor Gray
+    Write-Host "• clear    - Очистить историю подключений" -ForegroundColor Gray
 
     # 🔍 Показываем unmark только если есть важные записи
     $hasImportant = $false
@@ -231,7 +231,7 @@ function Show-FullHistory {
             $displayHistory = Get-DisplayHistory -lines $history
             $displayHistory | ForEach-Object {
                 $line = $_
-                # ✅ ИСПРАВЛЕНО: ищем маркер важности [!] вместо ТЕЛ:
+                # Ищем маркер важности [!] вместо ТЕЛ:
                 $isImportant = $line -match '\[!\]'
                 
                 if ($isImportant) {
@@ -339,7 +339,8 @@ function Get-ConnectionCount {
 function Mark-ImportantConnection {
     if (-not (Test-Path $historyFile)) { Write-Host "История пуста." -ForegroundColor Yellow; Start-Sleep 2; return }
     $history = @(Get-Content $historyFile)
-    $recent = $history | Select-Object -Last 5
+    # 🔑 @() гарантирует массив даже при одной строке в истории
+    $recent = @($history | Select-Object -Last 5)
     if ($recent.Count -eq 0) { Write-Host "Нет записей для отметки." -ForegroundColor Yellow; Start-Sleep 2; return }
 
     Write-Host "`nПоследние подключения:" -ForegroundColor Cyan
@@ -357,7 +358,13 @@ function Mark-ImportantConnection {
         $phoneSuffix = ""
         $addPhone = Read-Host "Добавить номер телефона? (y/n)"
         if ($addPhone -match '^[yYдД]') {
-            $phone = Read-Host "Введите номер телефона"
+            # 🔑 0 — отмена всего действия (запись не отмечается)
+            $phone = Read-Host "Введите номер телефона (0 - отмена)"
+            if ($phone -eq "0") {
+                Write-Host "Действие отменено." -ForegroundColor Yellow
+                Start-Sleep 2
+                return
+            }
             if ($phone -ne "") { $phoneSuffix = " ТЕЛ: $phone" }
         }
 
@@ -757,7 +764,7 @@ while ($true) {
         Write-Host "• ping $hostExample / $examplePing (-t для бесконечного пинга)"
         Write-Host "• help → Справка по дополнительным командам"
         Write-Host "• his → Показать всю историю подключений"
-        Write-Host "• clear → Очистить историю подключений"
+        Write-Host "• mark → Отметить подключение как важное"
         
         $userInput = Read-Host "Введите данные (Enter для выхода)"
         if ([string]::IsNullOrEmpty($userInput)) { break }
@@ -871,7 +878,15 @@ while ($true) {
         # === Преобразование в IP ===
         $ip = $null
         if ($userInput -match '^[\d\.]+$') {
-            if ($userInput -match '^(\d{1,3})\.(\d{1,3})$') {
+            # 🔑 Полный IP (например 172.20.29.104) — используется как есть,
+            # без парсинга в 192.168.x.x. Не затмевает логику коротких форм.
+            if ($userInput -match '^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$') {
+                $octets = @($userInput -split '\.' | ForEach-Object { [int]$_ })
+                if (($octets | Where-Object { $_ -gt 255 }).Count -gt 0) {
+                    Write-Host "Ошибка IP! Октет больше 255." -ForegroundColor Red; Start-Sleep 2; continue
+                }
+                $ip = $userInput
+            } elseif ($userInput -match '^(\d{1,3})\.(\d{1,3})$') {
                 $o3=[int]$matches[1]; $o4=[int]$matches[2]
                 if ($o3 -gt 255 -or $o4 -gt 255) { Write-Host "Ошибка IP!" -ForegroundColor Red; Start-Sleep 2; continue }
                 $ip = "192.168.$o3.$o4"
@@ -904,7 +919,8 @@ while ($true) {
             $check = Test-TCPPortWithRetry -Target $ip
             if ($check.Success) {
                 $oct3 = [int]($ip -split '\.')[2]
-                if (-not ($knownSubnets -contains $oct3)) {
+                # Предложение добавить подсеть — только для адресов 192.168.x.x
+                if ($ip -like "192.168.*" -and -not ($knownSubnets -contains $oct3)) {
                     if ((Read-Host "Новая подсеть $oct3. Добавить? (y/n)") -match '^[yYдД]') {
                         Update-KnownSubnetsInScript -newSubnet $oct3
                         $knownSubnets += $oct3; $knownSubnets = $knownSubnets | Sort-Object
