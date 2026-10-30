@@ -1,9 +1,9 @@
 ﻿# =============================================
-# Умное подключение MSRA v2.26
+# Умное подключение MSRA v2.27
 # Поддержка: trueconf, pacs, ping, история и т.д.
 # =============================================
 
-$scriptVersion = "2.26"  # v2.26: полные IP (172.20.x.x и др.), отмена по 0 в mark, правки меню
+$scriptVersion = "2.27"  # v2.27: случайный пример полного IP в меню (172.x.x.x)
 
 # Настройки истории
 $historyFile = Join-Path $PSScriptRoot "msra_history.log"
@@ -738,6 +738,13 @@ $exampleJoined = "$randomSubnet$randomTailJoined"
 $exampleIPDotted = "192.168.$randomSubnet.$randomTailDotted"
 $exampleIPJoined = "192.168.$randomSubnet.$randomTailJoined"
 
+# Случайный пример полного IP: первый октет всегда 172,
+# второй — из приватного диапазона 172.16-172.31 (16-31)
+$randomFullSecond = (16, 20, 21) | Get-Random
+$randomFullThird = Get-Random -Minimum 0 -Maximum 100
+$randomFullFourth = Get-Random -Minimum 1 -Maximum 255
+$exampleFullIP = "172.$randomFullSecond.$randomFullThird.$randomFullFourth"
+
 $randomTailPing = Get-Random -Minimum 10 -Maximum 99
 $examplePing = "$randomSubnet$randomTailPing"
 $examplePingIP = "192.168.$randomSubnet.$randomTailPing"
@@ -761,6 +768,7 @@ while ($true) {
         Write-Host "• $exampleDotted → $exampleIPDotted"
         Write-Host "• $exampleJoined → $exampleIPJoined"
         Write-Host "• Имя хоста (например $hostExample)"
+        Write-Host "• Любой формат «четыре октета через точку», напр. $exampleFullIP"
         Write-Host "• ping $hostExample / $examplePing (-t для бесконечного пинга)"
         Write-Host "• help → Справка по дополнительным командам"
         Write-Host "• his → Показать всю историю подключений"
