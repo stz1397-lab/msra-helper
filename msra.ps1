@@ -1,9 +1,9 @@
 ﻿# =============================================
-# Умное подключение MSRA v2.27
+# Умное подключение MSRA v2.29
 # Поддержка: trueconf, pacs, ping, история и т.д.
 # =============================================
 
-$scriptVersion = "2.27"  # v2.27: случайный пример полного IP в меню (172.x.x.x)
+$scriptVersion = "2.29"  # v2.29: Del удаляет любую запись со статусом не "Успешно", убран fixfont
 
 # Настройки истории
 $historyFile = Join-Path $PSScriptRoot "msra_history.log"
@@ -13,7 +13,7 @@ $autoCleanupTime = "07:30"  # Время очистки (24-часовой фо�
 $cleanupMarkerFile = Join-Path $PSScriptRoot "msra_cleanup.marker"
 
 # Список известных подсетей
-$knownSubnets = @(2, 3, 11, 13, 14, 15, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 31, 32, 33, 35, 36, 37, 38, 48, 56, 57, 60, 61, 63, 91, 92, 96, 97, 98, 102, 103, 104, 105, 106, 107, 110, 111, 112, 113, 114, 122, 123, 124, 125, 126, 128, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 145, 214, 215)
+$knownSubnets = @(2, 3, 11, 13, 14, 15, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 31, 32, 33, 35, 36, 37, 38, 48, 56, 57, 60, 61, 63, 91, 92, 96, 97, 98, 102, 103, 104, 105, 106, 107, 110, 111, 112, 113, 114, 122, 123, 124, 125, 126, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 145, 214, 215)
 
 # --- Функции ---
 function Show-Help {
@@ -136,13 +136,24 @@ function Clear-HistoryFile {
 
 function Remove-FailedHistoryEntries {
     if (Test-Path $historyFile) {
-        $history = Get-Content $historyFile
-        $filteredHistory = $history | Where-Object { $_ -notmatch "Нет пинга" }
+        # Удаляем ЛЮБУЮ запись, у которой статус не "Успешно" — не только "Нет пинга".
+        # Так Del зацепит и записи с нестандартным/повреждённым статусом.
+        $history = @(Get-Content $historyFile | Where-Object { $_ -ne "" })
+        $filteredHistory = @()
+        $removedCount = 0
 
-        if ($filteredHistory.Count -eq $history.Count) {
+        foreach ($line in $history) {
+            $fields = $line.Trim() -split '\s*\|\s*'
+            if ($fields.Count -ge 4 -and $fields[3].Trim() -eq "Успешно") {
+                $filteredHistory += $line
+            } else {
+                $removedCount++
+            }
+        }
+
+        if ($removedCount -eq 0) {
             Write-Host "Нет неудачных записей для удаления." -ForegroundColor Yellow
         } else {
-            $removedCount = $history.Count - $filteredHistory.Count
             $filteredHistory | Set-Content $historyFile -Encoding utf8
             Write-Host "Удалено $removedCount неудачных записей из истории." -ForegroundColor Red
         }
@@ -271,7 +282,7 @@ function Show-FullHistory {
                 { $_ -in "delall", "вудфдд" } {
                     if (Test-Path $historyFile) {
                         $historyBefore = @(Get-Content $historyFile)
-                        $failedCount = ($historyBefore -match "Нет пинга").Count
+                        $failedCount = @($historyBefore | Where-Object { $_ -notmatch "Успешно" }).Count
                         if ($failedCount -gt 0) { Remove-FailedHistoryEntries }
                         if (Test-ConsecutiveDuplicates) { Remove-DuplicateHistoryEntries }
                         $historyAfter = @(Get-Content $historyFile)
@@ -660,66 +671,57 @@ function Start-Ping {
 
     if ($Continuous) {
         Write-Host "Бесконечный пинг $Target (Нажмите Q для остановки)" -ForegroundColor Yellow
-        Write-Host ""
-        $psi = New-Object System.Diagnostics.ProcessStartInfo
-        $psi.FileName = "ping"
-        $psi.Arguments = "$Target -t"
-        $psi.UseShellExecute = $false
-        $psi.RedirectStandardOutput = $true
-        $psi.CreateNoWindow = $true
-        $pingProcess = New-Object System.Diagnostics.Process
-        $pingProcess.StartInfo = $psi
-
-        $pingProcess.Start() | Out-Null
-
-        while (-not $pingProcess.HasExited) {
-            $line = $pingProcess.StandardOutput.ReadLine()
-            if ($line -ne $null) {
-                Write-Host $line
-            }
-
-            if ($Host.UI.RawUI.KeyAvailable) {
-                $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-                if ($key.Character -in 'q','Q','й','Й') {
-                    $pingProcess.Kill()
-                    Write-Host "`nПинг остановлен" -ForegroundColor Yellow
-                    break
-                }
-            }
-            Start-Sleep -Milliseconds 10
-        }
     } else {
         Write-Host "Пинг $Target (4 запроса). Нажмите Q для отмены" -ForegroundColor Yellow
-        Write-Host ""
-
-        $psi = New-Object System.Diagnostics.ProcessStartInfo
-        $psi.FileName = "ping"
-        $psi.Arguments = "$Target -n 4"
-        $psi.UseShellExecute = $false
-        $psi.RedirectStandardOutput = $true
-        $psi.CreateNoWindow = $true
-        $pingProcess = New-Object System.Diagnostics.Process
-        $pingProcess.StartInfo = $psi
-
-        $pingProcess.Start() | Out-Null
-
-        while (-not $pingProcess.StandardOutput.EndOfStream) {
-            $line = $pingProcess.StandardOutput.ReadLine()
-            if ($line -ne $null) {
-                Write-Host $line
-            }
-
-            if ($Host.UI.RawUI.KeyAvailable) {
-                $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-                if ($key.Character -in 'q','Q','й','Й') {
-                    $pingProcess.Kill()
-                    Write-Host "`nПинг остановлен пользователем" -ForegroundColor Yellow
-                    break
-                }
-            }
-            Start-Sleep -Milliseconds 10
-        }
     }
+    Write-Host ""
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "ping"
+    if ($Continuous) { $psi.Arguments = "$Target -t" } else { $psi.Arguments = "$Target -n 4" }
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.CreateNoWindow = $true
+    $pingProcess = New-Object System.Diagnostics.Process
+    $pingProcess.StartInfo = $psi
+
+    $pingProcess.Start() | Out-Null
+
+    # Читаем вывод ping асинхронно и опрашиваем клавиатуру каждые 150 мс.
+    # Раньше ReadLine() блокировал цикл до прихода новой строки, и нажатие Q
+    # могло «потеряться» — отмена срабатывала через раз.
+    $cancelled = $false
+    $readTask = $pingProcess.StandardOutput.ReadLineAsync()
+    while (-not $pingProcess.HasExited -and -not $cancelled) {
+        if ($readTask.AsyncWaitHandle.WaitOne(150)) {
+            try { $line = $readTask.Result } catch { $line = $null }
+            if ($null -ne $line) { Write-Host $line }
+            if (-not $pingProcess.HasExited -and $null -ne $line) {
+                try { $readTask = $pingProcess.StandardOutput.ReadLineAsync() } catch { $cancelled = $true }
+            }
+        }
+        # Сливаем все накопленные нажатия и ловим Q/q/й/Й в любой раскладке
+        try {
+            while ([Console]::KeyAvailable) {
+                $key = [Console]::ReadKey($true)
+                if ($key.Key -eq [ConsoleKey]::Q -or $key.KeyChar -in 'q','Q','й','Й') { $cancelled = $true; break }
+            }
+        } catch { }
+    }
+
+    if ($cancelled) {
+        try { $pingProcess.Kill() } catch { }
+        Write-Host "`nПинг остановлен" -ForegroundColor Yellow
+    }
+
+    # Дочитываем остаток вывода, чтобы не потерять последние строки
+    try {
+        $null = $readTask.AsyncWaitHandle.WaitOne(500)
+        while (-not $pingProcess.StandardOutput.EndOfStream) {
+            $rest = $pingProcess.StandardOutput.ReadLine()
+            if ($null -ne $rest) { Write-Host $rest }
+        }
+    } catch { }
 
     Write-Host ""
     Read-Host "Нажмите Enter, чтобы вернуться в меню"
@@ -739,7 +741,7 @@ $exampleIPDotted = "192.168.$randomSubnet.$randomTailDotted"
 $exampleIPJoined = "192.168.$randomSubnet.$randomTailJoined"
 
 # Случайный пример полного IP: первый октет всегда 172,
-# второй — из приватного диапазона 172.16-172.31 (16-31)
+# второй — из списка 16, 20, 21; третий — не больше 99
 $randomFullSecond = (16, 20, 21) | Get-Random
 $randomFullThird = Get-Random -Minimum 0 -Maximum 100
 $randomFullFourth = Get-Random -Minimum 1 -Maximum 255
@@ -970,3 +972,4 @@ while ($true) {
         Start-Sleep -Seconds 2
     }
 }
+
