@@ -1,9 +1,9 @@
 ﻿# =============================================
-# Умное подключение MSRA v2.29
+# Умное подключение MSRA v2.30
 # Поддержка: trueconf, pacs, ping, история и т.д.
 # =============================================
 
-$scriptVersion = "2.29"  # v2.29: Del удаляет любую запись со статусом не "Успешно", убран fixfont
+$scriptVersion = "2.30"  # v2.30: unmark в меню при наличии важных записей, Mark показывает 9 последних
 
 # Настройки истории
 $historyFile = Join-Path $PSScriptRoot "msra_history.log"
@@ -37,7 +37,7 @@ function Show-Help {
     $hasImportant = $false
     if (Test-Path $historyFile) {
         $content = Get-Content $historyFile -ErrorAction SilentlyContinue
-        if ($content) { $hasImportant = ($content -match '\[ВАЖНО\]').Count -gt 0 }
+        if ($content) { $hasImportant = [bool]($content | Where-Object { $_ -match '\[!\]' }) }
     }
     if ($hasImportant) {
         Write-Host "• unmark    - Снять отметку важности с подключения" -ForegroundColor Gray
@@ -96,7 +96,7 @@ function Show-History {
             $displayHistory = Get-DisplayHistory -lines $history
             $displayHistory | Select-Object -Last 10 | ForEach-Object {
                 $line = $_
-                # ✅ Ищем [ВАЖНО] — телефон после него не влияет на подсветку
+                # ✅ Ищем [!] — телефон после него не влияет на подсветку
                 $isImportant = $line -match '\[!\]'
                 
                 if ($isImportant) {
@@ -350,8 +350,8 @@ function Get-ConnectionCount {
 function Mark-ImportantConnection {
     if (-not (Test-Path $historyFile)) { Write-Host "История пуста." -ForegroundColor Yellow; Start-Sleep 2; return }
     $history = @(Get-Content $historyFile)
-    # 🔑 @() гарантирует массив даже при одной строке в истории
-    $recent = @($history | Select-Object -Last 5)
+    # 🔑 @() гарантирует массив даже при одной строке в истории; показываем 9 последних
+    $recent = @($history | Select-Object -Last 9)
     if ($recent.Count -eq 0) { Write-Host "Нет записей для отметки." -ForegroundColor Yellow; Start-Sleep 2; return }
 
     Write-Host "`nПоследние подключения:" -ForegroundColor Cyan
@@ -775,7 +775,17 @@ while ($true) {
         Write-Host "• help → Справка по дополнительным командам"
         Write-Host "• his → Показать всю историю подключений"
         Write-Host "• mark → Отметить подключение как важное"
-        
+
+        # unmark показываем, только если есть отмеченные [!] подключения
+        $hasImportant = $false
+        if (Test-Path $historyFile) {
+            $menuContent = Get-Content $historyFile -ErrorAction SilentlyContinue
+            if ($menuContent) { $hasImportant = [bool]($menuContent | Where-Object { $_ -match '\[!\]' }) }
+        }
+        if ($hasImportant) {
+            Write-Host "• unmark → Снять отметку «важное» с подключения"
+        }
+
         $userInput = Read-Host "Введите данные (Enter для выхода)"
         if ([string]::IsNullOrEmpty($userInput)) { break }
 
