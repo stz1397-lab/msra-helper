@@ -1,9 +1,9 @@
 ﻿# =============================================
-# Умное подключение MSRA v2.30
+# Умное подключение MSRA v2.31
 # Поддержка: trueconf, pacs, ping, история и т.д.
 # =============================================
 
-$scriptVersion = "2.30"  # v2.30: unmark в меню при наличии важных записей, Mark показывает 9 последних
+$scriptVersion = "2.31"  # v2.31: Del корректно очищает файл, когда удаляется ВСЯ история
 
 # Настройки истории
 $historyFile = Join-Path $PSScriptRoot "msra_history.log"
@@ -13,7 +13,7 @@ $autoCleanupTime = "07:30"  # Время очистки (24-часовой фо�
 $cleanupMarkerFile = Join-Path $PSScriptRoot "msra_cleanup.marker"
 
 # Список известных подсетей
-$knownSubnets = @(2, 3, 11, 13, 14, 15, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 31, 32, 33, 35, 36, 37, 38, 48, 56, 57, 60, 61, 63, 91, 92, 96, 97, 98, 102, 103, 104, 105, 106, 107, 110, 111, 112, 113, 114, 122, 123, 124, 125, 126, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 145, 214, 215)
+$knownSubnets = @(2, 3, 11, 13, 14, 15, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 31, 32, 33, 35, 36, 37, 38, 48, 56, 57, 60, 61, 63, 91, 92, 96, 97, 98, 102, 103, 104, 105, 106, 107, 110, 111, 112, 113, 114, 122, 123, 124, 125, 126, 128, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 145, 214, 215)
 
 # --- Функции ---
 function Show-Help {
@@ -154,7 +154,14 @@ function Remove-FailedHistoryEntries {
         if ($removedCount -eq 0) {
             Write-Host "Нет неудачных записей для удаления." -ForegroundColor Yellow
         } else {
-            $filteredHistory | Set-Content $historyFile -Encoding utf8
+            # 🔑 Если после удаления не осталось НИ ОДНОЙ записи — пустой массив
+            # в конвейере заставляет Set-Content молча ничего не делать.
+            # Поэтому файл очищаем явно через Clear-Content.
+            if ($filteredHistory.Count -eq 0) {
+                Clear-Content $historyFile -ErrorAction SilentlyContinue
+            } else {
+                $filteredHistory | Set-Content $historyFile -Encoding utf8
+            }
             Write-Host "Удалено $removedCount неудачных записей из истории." -ForegroundColor Red
         }
         Start-Sleep -Seconds 2
@@ -982,4 +989,3 @@ while ($true) {
         Start-Sleep -Seconds 2
     }
 }
-
