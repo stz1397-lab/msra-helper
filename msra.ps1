@@ -1,9 +1,9 @@
 ﻿# =============================================
-# Умное подключение MSRA v2.31
+# Умное подключение MSRA v2.32
 # Поддержка: trueconf, pacs, ping, история и т.д.
 # =============================================
 
-$scriptVersion = "2.31"  # v2.31: Del корректно очищает файл, когда удаляется ВСЯ история
+$scriptVersion = "2.32"  # v2.32: Delall предлагается и когда дубликаты разделены неудачной записью
 
 # Настройки истории
 $historyFile = Join-Path $PSScriptRoot "msra_history.log"
@@ -13,7 +13,7 @@ $autoCleanupTime = "07:30"  # Время очистки (24-часовой фо�
 $cleanupMarkerFile = Join-Path $PSScriptRoot "msra_cleanup.marker"
 
 # Список известных подсетей
-$knownSubnets = @(2, 3, 11, 13, 14, 15, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 31, 32, 33, 35, 36, 37, 38, 48, 56, 57, 60, 61, 63, 91, 92, 96, 97, 98, 102, 103, 104, 105, 106, 107, 110, 111, 112, 113, 114, 122, 123, 124, 125, 126, 128, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 145, 214, 215)
+$knownSubnets = @(2, 3, 11, 13, 14, 15, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 31, 32, 33, 35, 36, 37, 38, 48, 56, 57, 60, 61, 63, 91, 92, 96, 97, 98, 102, 103, 104, 105, 106, 107, 109, 110, 111, 112, 113, 114, 122, 123, 124, 125, 126, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 145, 214, 215)
 
 # --- Функции ---
 function Show-Help {
@@ -214,6 +214,9 @@ function Remove-DuplicateHistoryEntries {
 }
 
 function Test-ConsecutiveDuplicates {
+    # -SkipFailed: игнорировать неудачные записи (как будто Del уже выполнен) —
+    # так находятся дубликаты, разделённые только неудачной попыткой
+    param([switch]$SkipFailed)
     if (Test-Path $historyFile) {
         # 🔑 @() гарантирует массив даже при 1 строке
         $history = @(Get-Content $historyFile)
@@ -226,6 +229,7 @@ function Test-ConsecutiveDuplicates {
             if ($fields.Count -ge 4) {
                 $target = $fields[2].Trim()
                 $status = $fields[3].Trim()
+                if ($SkipFailed -and $status -ne "Успешно") { continue }
                 
                 # Сравниваем ТОЛЬКО адрес и статус, игнорируя номер подключения
                 if ($target -eq $prevTarget -and $status -eq $prevStatus) {
@@ -275,11 +279,13 @@ function Show-FullHistory {
 
             $hasFailed = $failed -gt 0
             $hasDuplicates = Test-ConsecutiveDuplicates
+            # Дубликаты, которые станут соседними после удаления неудачных записей
+            $hasDupsAfterDel = $hasFailed -and (Test-ConsecutiveDuplicates -SkipFailed)
 
             Write-Host "`nДополнительные действия:" -ForegroundColor Yellow
             if ($hasFailed) { Write-Host "Del     - Удалить все неудачные подключения" }
             if ($hasDuplicates) { Write-Host "Deldbl  - Удалить подряд идущие дубликаты" }
-            if ($hasFailed -and $hasDuplicates) { Write-Host "Delall  - Удалить и неудачные, и дубликаты" }
+            if ($hasFailed -and ($hasDuplicates -or $hasDupsAfterDel)) { Write-Host "Delall  - Удалить и неудачные, и дубликаты" }
             Write-Host "Enter   - Вернуться в меню"
 
             $choice = Read-Host "`nВыбор"
@@ -825,7 +831,7 @@ while ($true) {
                 else {
                     Copy-Item $currentScript "$currentScript.bak" -Force
                     Copy-Item $tempFile $currentScript -Force
-                    Write-Host "Скрипт обновлён! Перезапуск..." -ForegroundColor Green; Start-Sleep -Seconds 1
+                    Write-Host "Скрипт обновлён! Перезапуск..." -ForegroundColor Green; Start-Sleep -Seconds 5
                     & $currentScript; exit
                 }
             } catch { Write-Host "Ошибка обновления: $_" -ForegroundColor Red }
